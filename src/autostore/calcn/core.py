@@ -55,7 +55,7 @@ class Calculation(BaseModel):
     basis: str | None = None
     input: str | None = None
     keywords: dict[str, Any | dict | None] = Field(default_factory=dict)
-    subprogram_keywords: dict[str, Any | dict | None] = Field(default_factory=dict)
+    superprogram_keywords: dict[str, Any | dict | None] = Field(default_factory=dict)
     cmdline_args: list[str] = Field(default_factory=list)
     files: dict[str, str] = Field(default_factory=dict)
     calctype: str | None = None
@@ -81,11 +81,11 @@ class Calculation(BaseModel):
             return DualProgramInput(
                 calctype=calctype,
                 structure=qc.structure.from_geometry(geo),
-                keywords=self.keywords,
+                keywords=self.superprogram_keywords,
                 subprogram=self.program,
                 subprogram_args=ProgramArgs(
                     model=model,
-                    keywords=self.subprogram_keywords,
+                    keywords=self.keywords,
                     cmdline_args=self.cmdline_args,
                     files=self.files,  # ty:ignore[invalid-argument-type]
                     extras=self.extras,
@@ -112,8 +112,8 @@ class Calculation(BaseModel):
                 program=prog_input.subprogram,
                 method=prog_input.subprogram_args.model.method,
                 basis=prog_input.subprogram_args.model.basis,
-                keywords=prog_input.keywords,
-                subprogram_keywords=prog_input.subprogram_args.keywords,
+                keywords=prog_input.subprogram_args.keywords,
+                superprogram_keywords=prog_input.keywords,
                 cmdline_args=prog_input.cmdline_args,
                 files=prog_input.files,  # ty:ignore[invalid-argument-type]
                 calctype=prog_input.calctype.value,

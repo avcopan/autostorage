@@ -74,10 +74,10 @@ def dual_calc() -> Calculation:
     return Calculation(
         program="crest",
         method="gfn2",
-        keywords={"check": 3},
+        superprogram_keywords={"check": 3},
         superprogram="geometric",
         calctype="optimization",
-        subprogram_keywords={"test_key": True},
+        keywords={"test_key": True},
     )
 
 
@@ -149,8 +149,8 @@ def test__dual_program_input() -> None:
     assert qc_calc.superprogram == "geometric"
     assert qc_calc.program == "crest"
     assert qc_calc.method == "gfn2"
-    assert qc_calc.keywords == {"check": 3}
-    assert qc_calc.subprogram_keywords == {"test": "value"}
+    assert qc_calc.superprogram_keywords == {"check": 3}
+    assert qc_calc.keywords == {"test": "value"}
     assert qc_calc.calctype == "optimization"
 
 
