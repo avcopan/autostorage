@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from sqlalchemy.types import String
-from sqlmodel import Column, Field, Relationship, SQLModel, JSON
+from sqlmodel import JSON, Column, Field, Relationship, SQLModel
 
 from ..calcn import Calculation
 
