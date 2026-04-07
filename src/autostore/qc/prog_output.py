@@ -1,19 +1,19 @@
-"""QCIO Results interface."""
+"""qc ProgramOutput interface."""
 
-from qcio import DualProgramInput, ProgramInput, Results
+from qcdata import DualProgramInput, ProgramInput, ProgramOutput
 
 from ..models import CalculationRow, GeometryRow
 from . import structure
 
 
-def calc_row(res: Results) -> CalculationRow:
+def calc_row(res: ProgramOutput) -> CalculationRow:
     """
-    Instantiate CalculationRow and GeometryRow from a qcio Results object.
+    Instantiate CalculationRow from ProgramOutput.
 
     Parameters
     ----------
     res
-        qcio Results object.
+        qc ProgramOutput object.
 
     Returns
     -------
@@ -54,7 +54,7 @@ def calc_row(res: Results) -> CalculationRow:
             ),  # NOTE: This is a placeholder for getting the subversion
             superprogram=res.provenance.program,
             superprogram_version=res.provenance.program_version,
-            **data,  # ty:ignore[invalid-argument-type]
+            **data,
         )
 
     if isinstance(prog_input, ProgramInput):
@@ -67,21 +67,21 @@ def calc_row(res: Results) -> CalculationRow:
             cmdline_args=prog_input.cmdline_args,
             calctype=prog_input.calctype,
             program_version=res.provenance.program_version,
-            **data,  # ty:ignore[invalid-argument-type]
+            **data,
         )
 
     msg = f"Instantiation from {type(prog_input)} not implemented."
     raise NotImplementedError(msg)
 
 
-def geom_row(res: Results) -> GeometryRow:
+def geom_row(res: ProgramOutput) -> GeometryRow:
     """
-    Instantiate GeometryRow from a qcio Results object.
+    Instantiate GeometryRow from ProgramOutput.
 
     Parameters
     ----------
     res
-        qcio Results object.
+        qc ProgramOutput object.
 
     Returns
     -------

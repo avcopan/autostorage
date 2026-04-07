@@ -9,8 +9,8 @@ automol = "==0.0.6"
 crest = ">=3.0.2,<4"
 
 [pypi-dependencies]
-qcio = ">=0.16.2"
-qcop = ">=0.12.1, <0.13"
+qcdata = ">=0.17.0, <0.18"
+qccompute = ">=0.13.0, <0.14"
 
 [package]
 name = "automech-autostore"

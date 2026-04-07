@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from automol import Geometry
-from qcio import CalcType, Results
+from qcdata import CalcType, ProgramOutput
 
 from autostore import Calculation, Database, models, qc
 
@@ -46,9 +46,9 @@ def xtb_calculation() -> Calculation:
 
 
 @pytest.fixture
-def water_xtb_energy_results() -> Results:
+def water_xtb_energy_results() -> ProgramOutput:
     """Water energy calculation results fixture."""
-    return Results.model_validate(
+    return ProgramOutput.model_validate(
         {
             "input_data": {
                 "structure": {
@@ -72,28 +72,28 @@ def water_xtb_energy_results() -> Results:
 
 
 @pytest.fixture
-def h2_gfnff_stationary_results() -> Results:
+def h2_gfnff_stationary_results() -> ProgramOutput:
     """Water energy calculation results fixture."""
     with (Path(__file__).parent / "stationary.json").open(encoding="utf-8") as f:
         data = json.load(f)
 
-    return Results.model_validate(data)
+    return ProgramOutput.model_validate(data)
 
 
 def test_energy(
     water: Geometry,
-    water_xtb_energy_results: Results,
+    water_xtb_energy_results: ProgramOutput,
     database: Database,
 ) -> None:
     """Test writing and reading of the energy and corresponding database rows."""
     # Instantiate GeometryRow, write to database, and ensure correct hash population
     geom_row = models.GeometryRow(**water.model_dump())
-    geom_id = database.write(row=geom_row)  # ty:ignore[invalid-argument-type]
+    geom_id = database.write(row=geom_row)
     assert database.query(model=models.GeometryRow, hash=water.hash)[0] == geom_id
 
     # Instantiate CalculationRow, set input geometry id, write to database,
     # and ensure correct calctype
-    calc_row = qc.results.calc_row(water_xtb_energy_results)
+    calc_row = qc.prog_output.calc_row(water_xtb_energy_results)
     calc_row.input_geometry_id = geom_id
     calc_id = database.write(row=calc_row)  # ty:ignore[invalid-argument-type]
     assert (
@@ -108,24 +108,24 @@ def test_energy(
         calculation_id=calc_id,
         value=water_xtb_energy_results.data.energy,
     )
-    ene_id = database.write(row=ene_row)  # ty:ignore[invalid-argument-type]
+    ene_id = database.write(row=ene_row)
     assert database.query(model=models.EnergyRow, value=-5.062316802835694)[0] == ene_id
 
 
 def test_stationary(
     h2: Geometry,
-    h2_gfnff_stationary_results: Results,
+    h2_gfnff_stationary_results: ProgramOutput,
     database: Database,
 ) -> None:
     """Test writing and reading of the energy and corresponding database rows."""
     # Instantiate GeometryRow, write to database, and ensure correct hash population
     input_geom_row = models.GeometryRow(**h2.model_dump())
-    input_geom_id = database.write(row=input_geom_row)  # ty:ignore[invalid-argument-type]
+    input_geom_id = database.write(row=input_geom_row)
     assert database.query(model=models.GeometryRow, hash=h2.hash)[0] == input_geom_id
 
     # Instantiate CalculationRow, set input geometry id, write to database,
     # and ensure correct calctype
-    calc_row = qc.results.calc_row(h2_gfnff_stationary_results)
+    calc_row = qc.prog_output.calc_row(h2_gfnff_stationary_results)
     calc_row.input_geometry_id = input_geom_id
     calc_id = database.write(row=calc_row)  # ty:ignore[invalid-argument-type]
     assert (
@@ -138,7 +138,7 @@ def test_stationary(
     stp_row = models.StationaryPointRow(
         geometry_id=input_geom_id, calculation_id=calc_id, order=1
     )
-    stp_id = database.write(row=stp_row)  # ty:ignore[invalid-argument-type]
+    stp_id = database.write(row=stp_row)
     stp_row_fetch = database.fetch(model=models.StationaryPointRow, row_id=stp_id)
 
     assert stp_row == stp_row_fetch

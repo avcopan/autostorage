@@ -1,21 +1,15 @@
-"""QCIO ProgramInput interface."""
+"""qc ProgramInput interface."""
 
 import automol
 from automol import Geometry
-from qcio import (
-    CalcType,
-    DualProgramInput,
-    Model,
-    ProgramArgs,
-    ProgramInput,
-)
+from qcdata import CalcType, DualProgramInput, Model, ProgramArgs, ProgramInput
 
 from ..calcn import Calculation
 from ..models import CalculationRow, GeometryRow
 from . import structure
 
 
-def from_rows(
+def from_auto(
     calc: Calculation | CalculationRow,
     geo: Geometry,
     calctype: CalcType,
@@ -63,8 +57,8 @@ def from_rows(
     )
 
 
-def rows(prog_input: ProgramInput, prog: str) -> tuple[CalculationRow, GeometryRow]:
-    """Extract data from QCIO into a Calculation."""
+def calc_row(prog_input: ProgramInput, *, prog: str) -> CalculationRow:
+    """Extract ProgramInput into a Calculation."""
     data = {
         "cmdline_args": prog_input.cmdline_args,
         "files": prog_input.files,
@@ -80,17 +74,21 @@ def rows(prog_input: ProgramInput, prog: str) -> tuple[CalculationRow, GeometryR
             keywords=prog_input.subprogram_args.keywords,
             superprogram_keywords=prog_input.keywords,
             superprogram=prog,
-            **data,  # ty:ignore[invalid-argument-type]
+            **data,
         )
+
     else:
         calc_row = CalculationRow(
             program=prog,
             method=prog_input.model.method,
             basis=prog_input.model.basis,
             keywords=prog_input.keywords,
-            **data,  # ty:ignore[invalid-argument-type]
+            **data,
         )
 
-    geom_row = structure.geom_row(prog_input.structure)
+    return calc_row
 
-    return (calc_row, geom_row)
+
+def geom_row(prog_input: ProgramInput) -> GeometryRow:
+    """Extract ProgramInput into a Geometry."""
+    return structure.geom_row(prog_input.structure)

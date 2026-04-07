@@ -1,7 +1,7 @@
 """QCIO Structure interface."""
 
 import pint
-from qcio import Structure
+from qcdata import Structure
 
 from ..models import GeometryRow
 

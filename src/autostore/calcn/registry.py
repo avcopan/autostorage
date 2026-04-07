@@ -90,7 +90,7 @@ def hash_minimal(calc: Calculation) -> str:
         "method": "METHOD",
         "basis": "BASIS",
     }
-    return projected_hash(calc, template)
+    return projected_hash(calc, template)  # ty:ignore[invalid-argument-type]
 
 
 def calculation_hash(calc: Calculation, name: str = "minimal") -> str:

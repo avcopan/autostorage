@@ -25,7 +25,7 @@ class Calculation(BaseModel):
     input
         Input file for the calculation, if applicable.
     keywords
-        QCIO keywords for the calculation.
+        qc keywords for the calculation.
     superprogram_keywords
         Geometry optimizer keywords for the calculation.
     cmdline_args

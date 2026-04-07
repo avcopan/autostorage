@@ -2,7 +2,7 @@
 
 import pytest
 from automol import Geometry
-from qcio import CalcType, DualProgramInput, Structure
+from qcdata import CalcType, DualProgramInput, Structure
 
 from autostore import Calculation, calcn, qc
 from autostore.calcn import hash_registry
@@ -93,17 +93,17 @@ def user_defined_hash(calc: Calculation) -> str:
 
 
 @pytest.mark.parametrize("calc_fixture", ["standard_calc", "dual_calc"])
-def test__qcio_roundtrip_equiv(
+def test__qc_roundtrip_equiv(
     calc_fixture: str, water: Geometry, request: pytest.FixtureRequest
 ) -> None:
     """Test conversion from Calculation -> ProgramInput -> Calculation."""
     orig_calc: Calculation = request.getfixturevalue(calc_fixture)
     ctype = CalcType(orig_calc.calctype) if orig_calc.calctype else CalcType.energy
 
-    prog_input = qc.program.from_rows(orig_calc, water, ctype)
+    prog_input = qc.prog_input.from_auto(orig_calc, water, ctype)
     driver = orig_calc.superprogram or orig_calc.program
 
-    round_calc, _ = qc.program.rows(prog_input, prog=driver)
+    round_calc = qc.prog_input.calc_row(prog_input, prog=driver)
 
     hash_orig = calcn.calculation_hash(orig_calc, name="minimal")
     hash_round = calcn.calculation_hash(round_calc, name="minimal")
@@ -133,7 +133,7 @@ def test__dual_program_input() -> None:
         keywords={"check": 3},
     )
 
-    qc_calc, _ = qc.program.rows(prog_input, prog="geometric")
+    qc_calc = qc.prog_input.calc_row(prog_input, prog="geometric")
 
     assert qc_calc.superprogram == "geometric"
     assert qc_calc.program == "crest"

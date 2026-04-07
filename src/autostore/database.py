@@ -43,13 +43,13 @@ class Database:
         """Create a new database session."""
         return Session(self.engine)
 
-    def write(self, *, row: type[ModelT]) -> int:
+    def write(self, *, row: ModelT) -> int:
         """
         Write row to database.
 
         Parameters
         ----------
-        model
+        row
             Instance of a database model class.
 
         Returns
