@@ -1,9 +1,19 @@
 """SQLAlchemy types."""
 
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TypeVar
 
 import numpy as np
 from sqlalchemy.types import JSON, String, TypeDecorator
+from sqlmodel import SQLModel
+
+# Model Type
+ModelT = TypeVar("ModelT", bound=SQLModel)
+
+# Row ID Type Aliases
+RowID = int
+RowIDs = Sequence[RowID]
 
 
 class FloatArrayTypeDecorator(TypeDecorator):

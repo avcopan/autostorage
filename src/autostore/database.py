@@ -1,14 +1,12 @@
 """Database connection."""
 
 from pathlib import Path
-from typing import TypeVar
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import *  # noqa: F403
-
-ModelT = TypeVar("ModelT", bound=SQLModel)
+from .types import ModelT, RowID, RowIDs
 
 
 class Database:
@@ -43,7 +41,7 @@ class Database:
         """Create a new database session."""
         return Session(self.engine)
 
-    def add(self, *, row: ModelT) -> int | None:
+    def add(self, *, row: ModelT) -> RowID | None:
         """
         Add row to database.
 
@@ -54,7 +52,6 @@ class Database:
 
         Returns
         -------
-        row_id
             id corresponding to entry in model table or None if row does not assign id.
 
         Raises
@@ -74,7 +71,7 @@ class Database:
             msg = f"Failed to write {row = } to database."
             raise RuntimeError(msg) from e
 
-    def get(self, *, model: type[ModelT], row_id: int) -> ModelT:
+    def get(self, *, model: type[ModelT], row_id: RowID) -> ModelT:
         """
         Get row based on row id.
 
@@ -87,8 +84,7 @@ class Database:
 
         Returns
         -------
-        model
-            Instance of a database model class.
+            Instance of a database "model".
 
         Raises
         ------
@@ -110,9 +106,7 @@ class Database:
 
             return row
 
-    def query(
-        self, *, model: type[ModelT], **attributes: float | str | None
-    ) -> list[int]:
+    def query(self, *, model: type[ModelT], **attributes: float | str | None) -> RowIDs:
         """
         Query existing rows based on Class attributes.
 
@@ -125,7 +119,6 @@ class Database:
 
         Returns
         -------
-        row_ids
             ids corresponding to entries in model table.
         """
         with self.session() as session:

@@ -10,7 +10,7 @@ from sqlalchemy.types import JSON, String
 from sqlmodel import Column, Field, Relationship, Session, SQLModel, select
 
 from .calcn import Calculation, calculation_hash, hash_registry
-from .types import FloatArrayTypeDecorator, PathTypeDecorator, Role
+from .types import FloatArrayTypeDecorator, PathTypeDecorator, Role, RowID
 
 
 # --- Link Models -------------------------------
@@ -30,8 +30,8 @@ class StationaryIdentityLink(SQLModel, table=True):
 
     __tablename__ = "stationary_identity_link"
 
-    stationary_id: int = Field(foreign_key="stationary_point.id", primary_key=True)
-    identity_id: int = Field(foreign_key="identity.id", primary_key=True)
+    stationary_id: RowID = Field(foreign_key="stationary_point.id", primary_key=True)
+    identity_id: RowID = Field(foreign_key="identity.id", primary_key=True)
 
 
 class CalculationGeometryLink(SQLModel, table=True):
@@ -53,8 +53,8 @@ class CalculationGeometryLink(SQLModel, table=True):
     __tablename__ = "calculation_geometry_link"
     model_config = ConfigDict(use_enum_values=True)
 
-    geometry_id: int = Field(foreign_key="geometry.id", primary_key=True)
-    calculation_id: int = Field(foreign_key="calculation.id", primary_key=True)
+    geometry_id: RowID = Field(foreign_key="geometry.id", primary_key=True)
+    calculation_id: RowID = Field(foreign_key="calculation.id", primary_key=True)
     role: Role
 
 
@@ -118,7 +118,7 @@ class CalculationRow(Calculation, SQLModel, table=True):
 
     __tablename__ = "calculation"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
     # Have to redeclare these fields for sql type verification.
     keywords: dict[str, str | dict | None] = Field(
@@ -182,8 +182,8 @@ class CalculationHashRow(SQLModel, table=True):
 
     __tablename__ = "calculation_hash"
 
-    id: int | None = Field(default=None, primary_key=True)
-    calculation_id: int = Field(
+    id: RowID | None = Field(default=None, primary_key=True)
+    calculation_id: RowID = Field(
         foreign_key="calculation.id", index=True, nullable=False, ondelete="CASCADE"
     )
 
@@ -257,7 +257,7 @@ class GeometryRow(Geometry, SQLModel, table=True):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
     symbols: list[str] = Field(sa_column=Column(JSON))
     coordinates: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
@@ -326,12 +326,12 @@ class EnergyRow(SQLModel, table=True):
 
     __tablename__ = "energy"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
-    geometry_id: int | None = Field(
+    geometry_id: RowID | None = Field(
         default=None, foreign_key="geometry.id", ondelete="CASCADE"
     )
-    calculation_id: int | None = Field(
+    calculation_id: RowID | None = Field(
         default=None, foreign_key="calculation.id", ondelete="CASCADE"
     )
 
@@ -371,10 +371,10 @@ class StationaryPointRow(SQLModel, table=True):
 
     __tablename__ = "stationary_point"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
-    geometry_id: int = Field(foreign_key="geometry.id")
-    calculation_id: int = Field(foreign_key="calculation.id")
+    geometry_id: RowID = Field(foreign_key="geometry.id")
+    calculation_id: RowID = Field(foreign_key="calculation.id")
 
     order: int | None = Field(default=-1)
 
@@ -413,7 +413,7 @@ class IdentityRow(SQLModel, table=True):
 
     __tablename__ = "identity"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
     type: str
     algorithm: str
@@ -451,9 +451,9 @@ class MetricRow(SQLModel, table=True):
 
     __tablename__ = "metric"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: RowID | None = Field(default=None, primary_key=True)
 
-    stationary_id: int = Field(foreign_key="stationary_point.id", index=True)
+    stationary_id: RowID = Field(foreign_key="stationary_point.id", index=True)
 
     type: str = Field(index=True)
     label: str
