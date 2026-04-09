@@ -18,12 +18,13 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.9.3
         with:
           cache: true
+          frozen: true
           environments: dev
 
       - name: Build conda and PyPI packages
         run: |
-          pixi run build-conda
-          pixi run build-pypi
+          pixi run -e dev --frozen build-conda
+          pixi run -e dev --frozen build-pypi
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@v6
@@ -37,10 +38,10 @@ jobs:
       - name: Publish conda and PyPI packages
         run: |
           # Publish to Anaconda.org
-          pixi run publish-conda
+          pixi run -e dev --frozen publish-conda
 
           # Publish to PyPI
-          pixi run publish-pypi
+          pixi run -e dev --frozen publish-pypi
         env:
           ANACONDA_API_KEY: ${{ secrets.ANACONDA_API_KEY }}
           UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}

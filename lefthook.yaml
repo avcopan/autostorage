@@ -4,16 +4,16 @@ pre-commit:
     - .pixi/
   commands:
     fmt:
-      run: pixi run fmt
+      run: pixi run -e dev --frozen fmt
 
     lint:
-      run: pixi run lint
+      run: pixi run -e dev --frozen lint
 
     types:
-      run: pixi run types
+      run: pixi run -e dev --frozen types
 
     imports:
-      run: pixi run imports
+      run: pixi run -e dev --frozen imports
 
     test:
-      run: pixi run test
+      run: pixi run -e dev --frozen test
