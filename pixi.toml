@@ -25,7 +25,7 @@ ignore-pypi-mapping = false
 [feature.dev.dependencies]
 uv = "*"
 ruff = "*"
-ty = "*"
+ty = "==0.0.31"
 import-linter = "*"
 pytest = "*"
 pytest-cov = "*"
