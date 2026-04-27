@@ -4,18 +4,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
-- Separated Provenance fields from Calculation fields and created new ProvenanceRow to store the separated data.
-- Removed standalone qc module; integrated specific functions as methods on Row objects (specifically CalculationRow, ProvenanceRow, and GeometryRow).
-- Updated ModelRow attributes to follow snake_case guidelines.
-- CalculationRow.calc_type: str -> str | None to reduce redundancy at user-level. calc_type should be set by lower-level methods.
-- Modified calcn.core.project to avoid accidentally modifying the original Calculation instance.
-- Modified calcn.core.hash_full to reflect refactoring of CalculationRow attributes.
-- Database.query updated to skip NULL values and ids; method now always returns a list[RowID | None].
-- Convenience methods on GeometryRow for converting to/from Geometry & Structure.
-- StationaryPointRow now cascade deletes on deletion of linked GeometryRow / CalculationRow
-- Updated RowIDs type to list[RowID | None] for flexibility of Database methods.
-- Reworked all of the tests to facilitate debugging.
+- Explicitly set the Pixi Ty version to match the current marketplace extension.
 
+- Added database convenience methods:
+  - row_to_dict() for serializing rows to dictionaries (optionally including default fields)
+  - verify_single_iteration() to ensure Database.find() returns exactly one RowModel
+
+- Updated Database behavior:
+  - All methods (except delete()) now return full SQLModel objects instead of RowIDs
+  - Added eager_load parameter to add() and find() to include relationships on returned objects
+  - Introduced find_or_add() as a convenience wrapper (find() → add() if no match)
+  - Replaced query() entirely with find(), which accepts partially or fully populated models
+
+- Introduced partial model support:
+  - RowModel.partial(**attrs) allows constructing models with missing required fields for querying
+  - Implemented via autostore.models.optional using a PartialMixin
+
+- Refactored model structure:
+  - Split autostore/models.py into autostore/models/* for improved organization
+  - Separated provenance data into a new ProvenanceRow
+  - Shortened some lengthy model attribute names.
+  - Standardized model attributes to snake_case
+
+- Refined domain models and logic:
+  - CalculationRow.calc_type changed from str → str | None to reduce redundancy (handled at lower levels)
+  - Updated calcn.core.project to avoid mutating original Calculation instances
+  - Updated calcn.core.hash_full to reflect CalculationRow refactor
+
+- Simplified module structure:
+  - Removed standalone autostore/qc
+  - Moved relevant functionality onto row models (CalculationRow, ProvenanceRow, GeometryRow)
+
+- StationaryPointRow now cascade-deletes when linked GeometryRow or CalculationRow is deleted
+
+- Reworked test suite to improve modular testing and debugging
 
 ## [0.0.5] - 2026-04-09
 ### Added

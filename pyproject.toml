@@ -65,6 +65,20 @@ layers = [
     "autostore.calcn",
 ]
 
+[[tool.importlinter.contracts]]
+name = "AutoStore Models Layering"
+type = "layers"
+layers = [
+    "autostore.models.listeners",
+    "autostore.models.reaction",
+    "autostore.models.stationary",
+    "autostore.models.data",
+    "autostore.models.calculation",
+    "autostore.models.geometry",
+    "autostore.models.links",
+]
+
+
 # Pytest configurations
 [tool.pytest.ini_options]
 testpaths = ["tests", "src"]

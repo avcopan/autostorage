@@ -1,13 +1,14 @@
 """Database connection."""
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
 
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import selectinload
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from .models import *  # noqa: F403
-from .types import RowID, RowIDs, SQLModelT
+from .types import SQLModelT
+from .utils import row_to_dict
 
 
 class Database:
@@ -42,7 +43,12 @@ class Database:
         """Create a new database session."""
         return Session(self.engine)
 
-    def add(self, *, row: SQLModelT) -> RowID | None:
+    def add(
+        self,
+        row: SQLModelT,
+        *,
+        eager_load: bool = False,
+    ) -> SQLModelT:
         """
         Add row to database.
 
@@ -50,161 +56,141 @@ class Database:
         ----------
         row
             Instance of a database model class.
+        eager_load
+            If True, fully eager loads sqlmodel relationships with model return.
 
         Returns
         -------
-            id corresponding to entry in model table or None if row does not assign id.
+        Updated row instance.
 
         Raises
         ------
         SQLAlchemyError
             Database row failed to write.
         """
-        try:
-            with self.session() as session:
-                session.add(row)
-                session.commit()
-                session.refresh(row)
-                # Some rows do not have id so we must return None
-                return getattr(row, "id", None)
-
-        except (SQLAlchemyError, IntegrityError) as e:
-            msg = f"Failed to add {row = }. Try using Database.get_or_add() instead."
-            raise RuntimeError(msg) from e
-
-    def delete(self, *, model: type[SQLModelT], row_id: RowID) -> None:
-        """
-        Delete a row from the database based on row id.
-
-        Parameters
-        ----------
-        model
-            Database model class, e.g. CalculationRow or GeometryRow.
-        row_id
-            id corresponding to entry in model table.
-
-        Raises
-        ------
-        LookupError
-            Row ID is not found in model table.
-        RuntimeError
-            Database row failed to delete.
-        """
-        try:
-            with self.session() as session:
-                # Reuse the logic of finding the row first
-                row = session.get(model, row_id)
-
-                if row is None:
-                    msg = f"Unable to find {model.__tablename__} row with ID {row_id}."
-                    raise LookupError(msg)
-
-                session.delete(row)
-                session.commit()
-
-        except SQLAlchemyError as e:
-            msg = f"Failed to delete {model.__tablename__} with ID {row_id}."
-            raise RuntimeError(msg) from e
-
-    def get(self, *, model: type[SQLModelT], row_id: RowID) -> SQLModelT:
-        """
-        Get a row from the database based on row id.
-
-        Parameters
-        ----------
-        model
-            Database model class, e.g. CalculationRow or GeometryRow.
-        row_id
-            id corresponding to entry in model table.
-
-        Returns
-        -------
-            Instance of a database "model".
-
-        Raises
-        ------
-        LookupError
-            Row ID is not found in model table.
-        TypeError
-            Return type is not a database model.
-        """
         with self.session() as session:
-            row = session.get(model, row_id)
+            session.add(row)
+            session.commit()
+            session.refresh(row)
 
-            if row is None:
-                msg = f"Unable to find {model.__tablename__} row with ID {row_id}."
-                raise LookupError(msg)
-
-            if not isinstance(row, model):
-                msg = f"{row = }, {model = }"
-                raise TypeError(msg)
+            if eager_load:  # Add eager loading for all relationships
+                model = type(row)
+                statement = select(model)
+                for rel_name in model.__sqlmodel_relationships__:
+                    statement = statement.options(
+                        selectinload(getattr(model, rel_name))
+                    )
+                matches = session.exec(statement).first()
+                if not matches:
+                    msg = f"{row = } did not add to database."
+                    raise RuntimeError(msg)
+                return matches
 
             return row
 
-    def query_or_add(self, *, row: SQLModelT) -> RowIDs:
+    def delete(self, row: SQLModelT) -> None:
         """
-        Query existing rows based on Class keywords. If None, adds row to database.
+        Delete a row from the database.
 
         Parameters
         ----------
         row
             Instance of a database model class.
-
-        Returns
-        -------
-            id corresponding to entry in model table or None if row does not assign id.
-
-        Raises
-        ------
-        SQLAlchemyError
-            Database row failed to write.
         """
-        # Don't include id or null fields in query
-        unique_data = {
-            k: v for k, v in row.model_dump().items() if v is not None and k != "id"
-        }
-        row_ids = self.query(model=row.__class__, **unique_data)
+        with self.session() as session:
+            session.delete(row)
+            session.commit()
 
-        if row_ids == []:
-            return [self.add(row=row)]
-
-        if len(row_ids) > 0:
-            return row_ids
-
-        msg = f"Failed to query or add {row = }."
-        raise RuntimeError(msg)
-
-    def query(
-        self, *, model: type[SQLModelT], **attributes: float | str | None
-    ) -> RowIDs:
+    def find(
+        self,
+        row: SQLModelT,
+        *,
+        eager_load: bool = False,
+        exclude_defaults: bool = True,
+        exclude_id: bool = False,
+    ) -> Iterator[SQLModelT]:
         """
-        Query existing rows based on Class keywords.
+        Find matching rows in database.
+
+        If no matches, adds and yields row instance.
 
         Parameters
         ----------
-        model
-            Database model class, e.g. CalculationRow or GeometryRow.
-        **attributes
-            Database model class attributes, e.g. id = 1 or energy = -0.568.
+        row
+            Instance of a database model class.
+        session
+            (Optional) Instance of an active session.
+        eager_load
+            If True, fully eager loads sqlmodel relationships with model return.
+        exclude_defaults
+            If True, exclude default values from model dump.
+        exclude_id
+            If True, exclude id field from model dump (if applicable).
 
-        Returns
-        -------
-            ids corresponding to entries in model table.
+        Yields
+        ------
+            Instance of a database "model".
         """
+        data = row_to_dict(
+            row, exclude_defaults=exclude_defaults, exclude_id=exclude_id
+        )
         with self.session() as session:
+            model = type(row)
             statement = select(model)
 
-            # Append Select constructs to statement
-            for key, value in attributes.items():
-                if hasattr(model, key):
-                    # Skip NULL fields
-                    if value is None or key == "id":
-                        continue
-                    statement = statement.where(getattr(model, key) == value)
+            for k, v in data.items():
+                statement = statement.where(getattr(model, k) == v)
 
-            ids = [getattr(row, "id", None) for row in session.exec(statement).all()]
+            if eager_load:  # Add eager loading for all relationships
+                for rel_name in model.__sqlmodel_relationships__:
+                    statement = statement.options(
+                        selectinload(getattr(model, rel_name))
+                    )
 
-            return cast("RowIDs", ids)
+        yield from session.exec(statement)
+
+    def find_or_add(
+        self,
+        row: SQLModelT,
+        *,
+        eager_load: bool = False,
+        exclude_defaults: bool = True,
+        exclude_id: bool = False,
+    ) -> Iterator[SQLModelT]:
+        """
+        Find matching rows in database.
+
+        If no matches, adds and yields row instance.
+
+        Parameters
+        ----------
+        row
+            Instance of a database model class.
+        eager_load
+            If True, fully eager loads sqlmodel relationships with model return.
+        exclude_defaults
+            If True, exclude default values from model dump.
+        exclude_id
+            If True, exclude id field from model dump (if applicable).
+
+        Yields
+        ------
+            Instance of a database "model".
+        """
+        # Flag to avoid loading the whole iterator into memory.
+        found_any = False
+
+        for matching_row in self.find(
+            row,
+            eager_load=eager_load,
+            exclude_defaults=exclude_defaults,
+            exclude_id=exclude_id,
+        ):
+            found_any = True
+            yield matching_row
+
+        if not found_any:
+            yield self.add(row=row)
 
     def close(self) -> None:
         """Close the database connection.

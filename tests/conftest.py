@@ -1,18 +1,24 @@
 """Fixtures for tests."""
 
 from collections.abc import Iterator
+from pathlib import Path
 
 import numpy as np
 import pytest
 from automol import Geometry
+from qcdata import ProgramOutput
 
 from autostore import (
     Calculation,
+    CalculationGeometryLink,
     CalculationRow,
     Database,
     GeometryRow,
     StationaryPointRow,
 )
+from autostore.types import Role
+
+DATA_PATH = Path(__file__).parent / "data"
 
 
 @pytest.fixture
@@ -56,6 +62,13 @@ def dual_calc_row(dual_calc: Calculation) -> CalculationRow:
 
 
 @pytest.fixture
+def prog_out() -> ProgramOutput:
+    """Fixture for sample ProgramOutput."""
+    prog_out_json = DATA_PATH / "energy_program_output.json"
+    return ProgramOutput.model_validate_json(prog_out_json.read_bytes())
+
+
+@pytest.fixture
 def geo() -> Geometry:
     """Fixture for sample Geometry."""
     return Geometry(
@@ -73,12 +86,6 @@ def geo_row(geo: Geometry) -> GeometryRow:
 
 
 @pytest.fixture
-def stationary_row() -> StationaryPointRow:
-    """Fixture for sample StationaryRow."""
-    return StationaryPointRow(calculation_id=2, geometry_id=1, order=0, is_pseudo=False)
-
-
-@pytest.fixture
 def blank_database() -> Iterator[Database]:
     """In-memory blank database fixture."""
     db = Database(":memory:")
@@ -89,14 +96,44 @@ def blank_database() -> Iterator[Database]:
 
 
 @pytest.fixture
-def filled_database(
-    calc_row: CalculationRow, geo_row: GeometryRow, stationary_row: StationaryPointRow
+def calc_geo_database(
+    calc_row: CalculationRow, geo_row: GeometryRow
 ) -> Iterator[Database]:
-    """In-memory database with rows fixture."""
+    """Database fixture with CalculationRow, GeometryRow, CalculationGeometryLink."""
     db = Database(":memory:")
-    db.add(row=calc_row)
-    db.add(row=geo_row)
-    db.add(row=stationary_row)
+    db.add(calc_row)
+    db.add(geo_row)
+
+    assert calc_row.id is not None
+    assert geo_row.id is not None
+
+    calc_geo_link = CalculationGeometryLink(
+        calculation_id=calc_row.id, geometry_id=geo_row.id, role=Role.input
+    )
+    db.add(row=calc_geo_link)
+
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture
+def stationary_database(
+    calc_row: CalculationRow, geo_row: GeometryRow
+) -> Iterator[Database]:
+    """Database fixture with CalculationRow, GeometryRow, CalculationGeometryLink."""
+    db = Database(":memory:")
+    db.add(calc_row)
+    db.add(geo_row)
+
+    assert calc_row.id is not None
+    assert geo_row.id is not None
+
+    stp_row = StationaryPointRow(
+        calculation_id=calc_row.id, geometry_id=geo_row.id, order=0, is_pseudo=False
+    )
+    db.add(row=stp_row)
     try:
         yield db
     finally:

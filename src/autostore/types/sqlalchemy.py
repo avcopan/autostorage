@@ -10,10 +10,11 @@ from sqlmodel import SQLModel
 
 # Model Type
 SQLModelT = TypeVar("SQLModelT", bound=SQLModel)
+AttrT = TypeVar("AttrT", float, str, dict, list)
 
 # Row ID Type Aliases
 RowID = int
-RowIDs = Sequence[RowID | None]
+RowIDs = Sequence[RowID]
 
 
 class FloatArrayTypeDecorator(TypeDecorator):
