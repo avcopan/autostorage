@@ -1,5 +1,5 @@
 [project]
-name = "automech-autostore"
+name = "auto-store"
 version = "0.0.0"
 authors = [{name = "Andreas V. Copan", email = "avcopan@uga.edu"}]
 requires-python = ">= 3.12"
@@ -61,7 +61,7 @@ addopts = [
     "--doctest-modules",
     "--cov=autostore",
     "--cov-report=term-missing",
-    "--cov-report=xml",
+    "--cov-report=html",
 ]
 doctest_optionflags = "NORMALIZE_WHITESPACE"
 
