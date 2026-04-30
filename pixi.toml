@@ -83,6 +83,8 @@ publish-test-pypi = "uv publish --publish-url https://test.pypi.org/legacy/"
 version = "tbump current-version"
 changelog = { cmd = "keepachangelog release {{ version }}", args=["version"] }
 release = "tbump"
+# Toggle Git hooks on/off
+hooks = "./scripts/hooks.sh"
 # Setup and initialize this repository (only run once)
 setup = "./scripts/setup.sh"
 init = { cmd = "./scripts/init.sh", depends-on = ["setup"]}
