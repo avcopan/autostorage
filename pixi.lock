@@ -1255,7 +1255,7 @@ packages:
   timestamp: 1777555835412
 - conda: .
   name: autostorage
-  version: 0.0.6
+  version: 0.0.7
   build: pyh4616a5c_0
   subdir: noarch
   variants:
