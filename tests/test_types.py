@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from autostore.types import FloatArrayTypeDecorator, PathTypeDecorator
+from autostorage.types import FloatArrayTypeDecorator, PathTypeDecorator
 
 
 def test__float_array_decorator() -> None:

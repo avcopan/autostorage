@@ -1,4 +1,4 @@
-github_url = "https://github.com/avcopan/autostore"
+github_url = "https://github.com/avcopan/autostorage"
 
 [version]
 current = "0.0.6"
@@ -23,7 +23,7 @@ src = "pixi.toml"
 search = 'version = "{current_version}"'
 
 [[file]]
-src = "src/autostore/__init__.py"
+src = "src/autostorage/__init__.py"
 search = '__version__ = "{current_version}"'
 
 [[before_commit]]

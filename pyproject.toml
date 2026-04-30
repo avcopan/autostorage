@@ -1,5 +1,5 @@
 [project]
-name = "auto-store"
+name = "autostorage"
 version = "0.0.6"
 authors = [{name = "Andreas V. Copan", email = "avcopan@uga.edu"}]
 requires-python = ">= 3.12"
@@ -16,7 +16,7 @@ requires = ["uv_build"]
 
 # UV build configurations
 [tool.uv.build-backend]
-module-name = "autostore"
+module-name = "autostorage"
 
 # Ruff configurations
 [tool.ruff]
@@ -53,29 +53,29 @@ include = [
 
 # Import-linter configurations
 [tool.importlinter]
-root_package = "autostore"
+root_package = "autostorage"
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
 name = "AutoStore Layering"
 type = "layers"
 layers = [
-    "autostore.database",
-    "autostore.models",
-    "autostore.calcn",
+    "autostorage.database",
+    "autostorage.models",
+    "autostorage.calcn",
 ]
 
 [[tool.importlinter.contracts]]
 name = "AutoStore Models Layering"
 type = "layers"
 layers = [
-    "autostore.models.listeners",
-    "autostore.models.reaction",
-    "autostore.models.stationary",
-    "autostore.models.data",
-    "autostore.models.calculation",
-    "autostore.models.geometry",
-    "autostore.models.links",
+    "autostorage.models.listeners",
+    "autostorage.models.reaction",
+    "autostorage.models.stationary",
+    "autostorage.models.data",
+    "autostorage.models.calculation",
+    "autostorage.models.geometry",
+    "autostorage.models.links",
 ]
 
 
@@ -84,7 +84,7 @@ layers = [
 testpaths = ["tests", "src"]
 addopts = [
     "--doctest-modules",
-    "--cov=autostore",
+    "--cov=autostorage",
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
@@ -93,7 +93,7 @@ doctest_optionflags = "NORMALIZE_WHITESPACE"
 # Pytest-cov configurations
 [tool.coverage.run]
 branch = true
-source = ["autostore"]
+source = ["autostorage"]
 
 [tool.coverage.report]
 show_missing = true

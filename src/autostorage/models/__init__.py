@@ -1,4 +1,4 @@
-"""SQLModel row definitions for autostore.
+"""SQLModel row definitions.
 
 Layers to avoid circular imports at load time:
     links

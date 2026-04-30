@@ -1,1 +1,1 @@
-"""Tests for the AutoStore package."""
+"""Tests for the AutoStorage package."""

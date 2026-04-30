@@ -8,7 +8,7 @@ import pytest
 from automol import Geometry
 from qcdata import ProgramOutput
 
-from autostore import (
+from autostorage import (
     Calculation,
     CalculationGeometryLink,
     CalculationRow,
@@ -16,7 +16,7 @@ from autostore import (
     GeometryRow,
     StationaryPointRow,
 )
-from autostore.types import Role
+from autostorage.types import Role
 
 DATA_PATH = Path(__file__).parent / "data"
 

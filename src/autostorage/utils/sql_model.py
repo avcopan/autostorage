@@ -2,7 +2,7 @@
 
 from collections.abc import Iterator
 
-from autostore.types import SQLModelT
+from ..types import SQLModelT
 
 
 def row_to_dict(

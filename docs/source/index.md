@@ -1,4 +1,4 @@
-# autostore
+# autostorage
 
 :::{toctree}
 :maxdepth: 2

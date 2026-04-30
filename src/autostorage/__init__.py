@@ -1,4 +1,4 @@
-"""autostore."""
+"""Interface for database storage."""
 
 __version__ = "0.0.6"
 

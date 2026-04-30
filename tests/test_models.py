@@ -5,14 +5,14 @@ from automol import Geometry
 from automol.geom import geometry_hash
 from qcdata import ProgramOutput
 
-from autostore import (
+from autostorage import (
     Calculation,
     CalculationRow,
     Database,
     GeometryRow,
     StationaryPointRow,
 )
-from autostore.utils import verify_single_iteration
+from autostorage.utils import verify_single_iteration
 
 
 def test__calculation_calculation_row_equivalence(

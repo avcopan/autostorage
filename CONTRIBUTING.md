@@ -1,6 +1,6 @@
-# Contributing to autostore
+# Contributing to autostorage
 
-Thank you for your interest in contributing to **autostore**!
+Thank you for your interest in contributing to **autostorage**!
 Contributions of all kinds are welcome, including bug reports,
 documentation improvements, and new features.
 
@@ -155,7 +155,7 @@ To reduce redundancy between API models and Database rows while maintaining role
 If you add a new SQLModel table, always use the `Row` suffix — even if there is no corresponding domain model yet.
 
 ### Example
-`Calculation` | *autostore.calcn.core* | **(Domain Model)** | This class defines the data schema. 
+`Calculation` | *autostorage.calcn.core* | **(Domain Model)** | This class defines the data schema. 
 
 ```python
 # Explicitly declaring that this object is not a database table.
@@ -196,7 +196,7 @@ class Calculation(SQLModel, table=False):
         sa_column=Column(JSON),
     )
 ```
-`CalculationRow` | *autostore.models.calculation* | **Persistence Model** | This class inherits from Calculation and sets `table=True`. It adds database-specific fields like `id` and SQLAlchemy `Relationship` definitions.
+`CalculationRow` | *autostorage.models.calculation* | **Persistence Model** | This class inherits from Calculation and sets `table=True`. It adds database-specific fields like `id` and SQLAlchemy `Relationship` definitions.
 ```python
 # CalculationRow inherits attributes from Calculation and is declared as a database table.
 class CalculationRow(Calculation, table=True):

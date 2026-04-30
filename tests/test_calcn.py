@@ -2,9 +2,14 @@
 
 import pytest
 
-from autostore import Calculation
-from autostore.calcn import calculation_hash, hash_from_dict, project, project_keywords
-from autostore.calcn.registry import HashRegistry, hash_full, hash_minimal
+from autostorage import Calculation
+from autostorage.calcn import (
+    calculation_hash,
+    hash_from_dict,
+    project,
+    project_keywords,
+)
+from autostorage.calcn.registry import HashRegistry, hash_full, hash_minimal
 
 
 def test__deterministic_hash() -> None:

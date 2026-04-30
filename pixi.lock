@@ -1238,18 +1238,6 @@ packages:
   - pkg:pypi/asttokens?source=hash-mapping
   size: 28797
   timestamp: 1763410017955
-- conda: .
-  name: auto-store
-  version: 0.0.6
-  build: pyh4616a5c_0
-  subdir: noarch
-  variants:
-    target_platform: noarch
-  depends:
-  - python >=3.12
-  - python *
-  - pint >=0.25.2
-  - sqlmodel >=0.0.31
 - conda: https://conda.anaconda.org/avcopan/noarch/automol-0.0.10-pyh4616a5c_0.conda
   sha256: 85b37ef3ed13ab862bf4d8243afddf3ba5572a94fb59ed38291cb6d333b41a4b
   md5: 40c9403537dffcd7137a65f2b8eeb240
@@ -1265,6 +1253,18 @@ packages:
   - scipy >=1.13
   size: 17486
   timestamp: 1777555835412
+- conda: .
+  name: autostorage
+  version: 0.0.6
+  build: pyh4616a5c_0
+  subdir: noarch
+  variants:
+    target_platform: noarch
+  depends:
+  - python >=3.12
+  - python *
+  - pint >=0.25.2
+  - sqlmodel >=0.0.31
 - conda: https://conda.anaconda.org/conda-forge/noarch/babel-2.17.0-pyhd8ed1ab_0.conda
   sha256: 1c656a35800b7f57f7371605bc6507c8d3ad60fbaaec65876fce7f73df1fc8ac
   md5: 0a01c169f0ab0f91b26e77a3301fbfe4

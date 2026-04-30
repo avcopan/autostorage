@@ -3,8 +3,8 @@
 import pytest
 from sqlalchemy.exc import IntegrityError, InvalidRequestError
 
-from autostore import CalculationGeometryLink, CalculationRow, Database
-from autostore.utils import row_to_dict, verify_single_iteration
+from autostorage import CalculationGeometryLink, CalculationRow, Database
+from autostorage.utils import row_to_dict, verify_single_iteration
 
 
 def test__add(blank_database: Database, calc_row: CalculationRow) -> None:

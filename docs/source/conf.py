@@ -8,10 +8,10 @@ current_script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_script_dir)
 
 # 1. Project information
-project = "autostore"
+project = "autostorage"
 copyright = "2026 Andreas V. Copan"
 author = "Andreas V. Copan"
-release = metadata.version("auto-store")
+release = metadata.version("autostorage")
 
 # 2. General configuration
 extensions = [
@@ -26,7 +26,7 @@ exclude_patterns = []
 html_theme = "pydata_sphinx_theme"
 html_static_path = []
 html_theme_options = {
-    "github_url": "https://github.com/avcopan/autostore",
+    "github_url": "https://github.com/avcopan/autostorage",
 }
 
 # 4. MyST configuration
@@ -38,7 +38,7 @@ myst_enable_extensions = [
 
 # 5. Autodoc2 configuration
 autodoc2_packages = [
-    "../../src/autostore",
+    "../../src/autostorage",
 ]
 autodoc2_render_plugin = "myst"
 autodoc2_docstring_parser_regexes = [
