@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from qcdata import DualProgramInput, Model, ProgramInput, ProgramOutput
+from qcdata import CalcType, DualProgramInput, Model, ProgramInput, ProgramOutput
 from sqlalchemy.types import JSON, String
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -101,7 +101,9 @@ class CalculationRow(PartialMixin, Calculation, SQLModel, table=True):
 
     # - Methods -----------------------
     @staticmethod
-    def from_calculation(calc: Calculation) -> "CalculationRow":
+    def from_calculation(
+        calc: Calculation, *, calc_type: CalcType | None = None
+    ) -> "CalculationRow":
         """
         Instantiate CalculationRow from Calculation.
 
@@ -109,7 +111,10 @@ class CalculationRow(PartialMixin, Calculation, SQLModel, table=True):
         -------
         CalculationRow
         """
-        return CalculationRow(**calc.model_dump(exclude_defaults=True))
+        calc_row = CalculationRow(**calc.model_dump(exclude_defaults=True))
+        if calc_type:
+            calc_row.calc_type = calc_type
+        return calc_row
 
     def calculation(self) -> Calculation:
         """

@@ -50,8 +50,8 @@ def verify_single_iteration(iterator: Iterator[SQLModelT]) -> SQLModelT:
     ValueError
         length of iterator is 0 or > 1.
     """
-    calc_row = next(iterator, None)
-    if not calc_row:
+    row = next(iterator, None)
+    if not row:
         msg = "iterator does not contain any database rows."
         raise ValueError(msg)
 
@@ -59,4 +59,4 @@ def verify_single_iteration(iterator: Iterator[SQLModelT]) -> SQLModelT:
         msg = "iterator contains more than one database row."
         raise ValueError(msg)
 
-    return calc_row
+    return row
