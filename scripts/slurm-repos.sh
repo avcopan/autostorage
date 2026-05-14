@@ -26,9 +26,9 @@ echo "==============================="
 
 # Check that the required repository directories exist
 for repo in "${REPOS[@]}"; do
-    if [[ ! -d "$ORIG_DIR/$repo" ]]; then
+    if [[ ! -d "$WORK_DIR/$repo" ]]; then
         echo "ERROR: Required repository directory missing!" >&2
-        echo "Path not found: $ORIG_DIR/$repo" >&2
+        echo "Path not found: $WORK_DIR/$repo" >&2
         exit 1
     fi
 done
