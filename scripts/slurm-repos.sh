@@ -6,7 +6,7 @@
 #SBATCH --time=4:00:00
 #SBATCH --mem=10G
 #SBATCH --array=0-1
-#SBATCH --output=log-%x-%A_%a.out
+#SBATCH --output=../log-%x-%A_%a.out
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ REPOS=("automol" "autostorage")
 REPO="${REPOS[$SLURM_ARRAY_TASK_ID]}"
 
 # Directories
-WORK_DIR=$SLURM_SUBMIT_DIR
+WORK_DIR=$(dirname "$SLURM_SUBMIT_DIR")
 
 echo "=== Job Info ==="
 echo "TASK_ID        = $SLURM_ARRAY_TASK_ID"
