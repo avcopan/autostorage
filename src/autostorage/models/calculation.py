@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from qcdata import CalcType
 from sqlalchemy.types import JSON, String
-from sqlmodel import Column, Field, Relationship, SQLModel
+from sqlmodel import Column, Field, Relationship
 
 from ..calcn import Calculation
 from ..types import PathTypeDecorator, RowID
@@ -163,7 +163,7 @@ class ProvenanceRow(BaseRow, table=True):
     calculation: CalculationRow = Relationship(back_populates="provenance")
 
 
-class CalculationHashRow(SQLModel, table=True):
+class CalculationHashRow(BaseRow, table=True):
     """
     Hash value for a calculation for identification and deduplication.
 

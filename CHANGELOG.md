@@ -4,6 +4,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Add
+
+- **Database execution API**
+    - `Database.get(model=..., row_id=...)`: Fetch database models by ID.
+    - `Database.exec_first()`, `Database.exec_one()`, and `Database.exec_all()`: Execute SQLModel Select statements.
+- **SQLModel Select factories**:
+    - `select.matching_rows()` and `select.linked_rows()`: Conveniently generate SQLModel Select statements.
+- **Row models**:
+    - `TrajectoryRow`, `CalculationTrajectoryLink`, and `GeometryTrajectoryLink`: Store ordered outputs of a single calculation and establish relationships to `calculation` and `geometry` tables.
+- **`BaseRow` model**: Manage universal attributes and mixin methods across all row models.
+- **`ComparisonMixin`**: Define equivalency behavior between database rows without including row IDs.
+- **`IdentityExtraRow`**: Tag identities with non-queryable attributes (e.g., SMILES strings).
+- **`utils.iterator`**: Operate on iterables, such as `iterator.is_empty()`.
+
+### Change
+
+- **Module refactors**: 
+  - `database` -> `database.core`.
+  - `models.optional` -> `models.base`.
+- **Documentation**: Model docstrings explicitly mark SQL Relationship attributes with `[SQL]`.
+- **Listeners**: `on_stationary_point_insert` listener to implement `automol.Identity`.
+- **Testing**: Test suite to reflect recent refactors and additions.
+
+### Remove
+
+- **Database execution API**: `Database.find()` and `Database.find_or_add()`.
+- **Data parsing methods**: 
+    - `CalculationRow.program_input()`, `CalculationRow.from_program_output()`, `ProvenanceRow.from_program_output()`: Separate data parsing responsibilities from core package.
+    - `GeometryRow.structure()`, `GeometryRow.from_structure()`: Refactor Geometry methods into `automol`.
+- **`utils.sqlalchemy.row_to_dict()`**: Encourage `BaseRow.model_dump(include=..., exclude=...)`.
+
+### Fix
+
+- **`Database.session()`**: Yield a persistent session.
+- **`automol`**: Bump to `0.0.13`.
+
+### Security
+
+- **Move `SQLModelT` `TypeVar` to `models.base`**: Resolve a circular import issue.
+- **Reconfigure layering**: Ensure `types.*` remains the lowest-level dependency.
+
 
 ## [0.0.7] - 2026-04-30
 - Renames library to "AutoStorage" to avoid PyPI name conflicts
