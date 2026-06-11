@@ -7,8 +7,8 @@ from pathlib import Path
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.sql.expression import SelectOfScalar
 
-from ..models import *  # noqa: F403
-from ..models.base import BaseRowT
+from .models import *  # noqa: F403
+from .models.base import BaseRowT
 
 
 class Database:
@@ -69,7 +69,7 @@ class Database:
             if row is not None:
                 return row
 
-        msg = f"{model} with {id = } not found."
+        msg = f"{model} with {row_id = } not found."
         raise LookupError(msg)
 
     def exec_first(self, stmt: SelectOfScalar[BaseRowT]) -> BaseRowT | None:

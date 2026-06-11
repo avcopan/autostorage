@@ -1,0 +1,5 @@
+%base "opt"
+! XTB
+! OPT
+
+*xyzfile 0 2 inp.xyz

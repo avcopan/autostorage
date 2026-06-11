@@ -1,18 +1,10 @@
-"""SQLAlchemy types."""
+"""Autostorage types."""
 
-from collections.abc import Sequence
+from enum import StrEnum
 from pathlib import Path
-from typing import TypeVar
 
 import numpy as np
 from sqlalchemy.types import JSON, String, TypeDecorator
-
-# Model Type
-AttrT = TypeVar("AttrT", float, str, dict, list)
-
-# Row ID Type Aliases
-RowID = int
-RowIDs = Sequence[RowID]
 
 
 class FloatArrayTypeDecorator(TypeDecorator):
@@ -53,3 +45,10 @@ class PathTypeDecorator(TypeDecorator):
         if value is not None:
             return Path(value)
         return value
+
+
+class Role(StrEnum):
+    """Calculation geometry roles."""
+
+    input = "input"
+    output = "output"

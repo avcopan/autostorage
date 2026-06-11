@@ -5,10 +5,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from automol import Geometry
-from qcdata import ProgramOutput
+from automatics import Calculation, Geometry
 
-from autostorage import Calculation, Database
+from autostorage import Database
 from autostorage.models import CalculationRow, GeometryRow
 
 DATA_PATH = Path(__file__).parent / "data"

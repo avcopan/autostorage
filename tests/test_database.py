@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from autostorage import Calculation, Database
-from autostorage.database import select
+from autostorage.utils import select
 from autostorage.models import CalculationRow
 
 

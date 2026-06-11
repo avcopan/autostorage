@@ -7,8 +7,6 @@ from typing import Annotated, Any, ClassVar, Self, TypeVar, cast
 from pydantic import BaseModel, Field, create_model
 from sqlmodel import SQLModel
 
-UNDEFINED = object()
-
 
 def make_fields_optional[ModelT: BaseModel](model_cls: type[ModelT]) -> type[ModelT]:
     """Convert RowModel to an OptionalModel retaining original fields and typing."""
@@ -41,11 +39,10 @@ def make_fields_optional[ModelT: BaseModel](model_cls: type[ModelT]) -> type[Mod
         "type[ModelT]",
         create_model(
             f"{model_cls.__name__}Optional",
-            __base__=BaseModel,
             __module__=model_cls.__module__,
             __config__=model_cls.model_config,
             **new_fields,
-        ),
+        ),  # ty:ignore[no-matching-overload]
     )
 
 
