@@ -5,10 +5,10 @@ preview = ["pixi-build"]
 
 [dependencies]
 autostorage = { path = "." }
-# automatics = "==0.0.3" # local:false
-automatics = { path = "../automatics" } # local:true
-# automol = "==0.0.13"  # local:false
-automol = { path = "../automol" }  # local:true
+automatics = "==0.0.4" # local:false
+# automatics = { path = "../automatics" } # local:true
+automol = "==0.0.14"  # local:false
+# automol = { path = "../automol" }  # local:true
 
 [pypi-dependencies]
 

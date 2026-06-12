@@ -1,6 +1,5 @@
 """Autostorage types."""
 
-from enum import StrEnum
 from pathlib import Path
 
 import numpy as np
@@ -45,10 +44,3 @@ class PathTypeDecorator(TypeDecorator):
         if value is not None:
             return Path(value)
         return value
-
-
-class Role(StrEnum):
-    """Calculation geometry roles."""
-
-    input = "input"
-    output = "output"

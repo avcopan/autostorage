@@ -1,7 +1,7 @@
 """database tables."""
 
 from . import base
-from .calculation import CalculationRow, EnergyRow, ModelRow, ProvenanceRow
+from .calculation import CalculationRow, EnergyRow, ModelRow
 from .geom import (
     GeometryRow,
     IdentityExtraRow,
@@ -22,7 +22,6 @@ __all__ = [
     "IdentityExtraRow",
     "IdentityRow",
     "ModelRow",
-    "ProvenanceRow",
     "StageRow",
     "StationaryIdentityLink",
     "StationaryPointRow",

@@ -71,6 +71,10 @@ class CalculationRow(BaseRow, table=True):
         Foreign key to the input trajectory.
     output_trajectory_id : int, optional
         Foreign key to the output trajectory.
+    input_provenance : dict, optional
+        Dictionary of input provenance fields.
+    output_provenance : dict, optional
+        Dictionary of output provenance fields.
     model : ModelRow
         Instance of the calculation model.
     input_geometry : GeometryRow, optional
@@ -81,13 +85,11 @@ class CalculationRow(BaseRow, table=True):
         Instance of the input trajectory.
     output_trajectory : TrajectoryRow, optional
         Instance of the output trajectory.
-    provenance : ProvenanceRow, optional
-        Instance of the calculation provenance.
 
     Example
     -------
     ```
-    from autostorage import CalculationRow, ModelRow, GeometryRow, ProvenanceRow
+    from autostorage import CalculationRow, ModelRow, GeometryRow
 
     opt_model = ModelRow(
         program = "orca",
@@ -101,18 +103,16 @@ class CalculationRow(BaseRow, table=True):
         symbols=["H", "H"], coordinates=[[0,0,0], [0,0,0.7]], charge=0, spin=0
     )
 
-    prov = ProvenanceRow(input={"geom": {"maxiter": 500}})
-
     opt_calc = CalculationRow(
         model = opt_model,
         input_geometry = inp_geo,
-        provenance = prov,
+        input_provenance = {"geom": {"maxiter": 500}},
     )
 
     out_geo, out_prov = ... # custom method for executing ORCA
 
     opt_calc.output_geometry = out_geo
-    opt_calc.provenance.output = out_prov
+    opt_calc.output_provenance = out_prov
 
     db.add(opt_calc)
     ```
@@ -137,6 +137,13 @@ class CalculationRow(BaseRow, table=True):
         default=None, foreign_key="trajectory.id", ondelete="CASCADE"
     )
 
+    input_provenance: dict[str, Any] | None = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
+    output_provenance: dict[str, Any] | None = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
+
     model: "ModelRow" = Relationship(back_populates="calculations")
     input_geometry: "GeometryRow" = Relationship(
         back_populates="calculation_inputs",
@@ -156,44 +163,12 @@ class CalculationRow(BaseRow, table=True):
             "foreign_keys": "[CalculationRow.output_trajectory_id]"
         },
     )
-    provenance: "ProvenanceRow" = Relationship(back_populates="calculation")
     energies: list["EnergyRow"] = Relationship(
         back_populates="calculation", cascade_delete=True
     )
     stationary_points: list["StationaryPointRow"] = Relationship(
         back_populates="calculation"
     )
-
-
-class ProvenanceRow(BaseRow, table=True):
-    r"""Calculation input and output provenance.
-
-    Attributes
-    ----------
-    calculation_id : int
-        Foreign key to the calculation.
-    input : dict[str, Any]
-        Input provenance dictionary.
-    output : dict[str, Any]
-        Output provenance dictionary.
-    calculation : CalculationRow
-        Instance of the calculation.
-    """
-
-    __tablename__ = "provenance"
-
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        primary_key=True,
-        nullable=False,
-    )
-
-    input: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))
-    output: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))
-
-    calculation: "CalculationRow" = Relationship(back_populates="provenance")
 
 
 class EnergyRow(BaseRow, table=True):
