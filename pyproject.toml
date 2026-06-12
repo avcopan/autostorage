@@ -1,10 +1,14 @@
 [project]
 name = "autostorage"
 version = "0.0.7"
-authors = [{name = "Andreas V. Copan", email = "avcopan@uga.edu"}]
+authors = [
+    {name = "Andreas V. Copan", email = "avcopan@uga.edu"},
+    {name = "Troy N. Smith", email = "troy.smith@uga.edu"}
+]
 requires-python = ">= 3.12"
 dependencies = [
-    "automol==0.0.11",
+    "automatics==0.0.4",
+    "automol==0.0.14",
     "pint>=0.25.2",
     "qcdata>=0.17.0",
     "sqlmodel>=0.0.31",
@@ -29,7 +33,6 @@ exclude = [
 select = ["ALL"]
 ignore = [
     "COM812",   # missing trailing comma (handled by format)
-    "RUF022",   # `__all__` is not sorted
     "TID252",   # relative import
     "D203",     # confict: incorrect blank line before class (uses D211 instead)
     "D213",     # conflict: multi-line summary second line (uses D212 instead)
@@ -57,27 +60,15 @@ root_package = "autostorage"
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "AutoStore Layering"
+name = "Autostorage Layering"
 type = "layers"
 layers = [
+    "autostorage.read",
     "autostorage.database",
+    "autostorage.select",
     "autostorage.models",
-    "autostorage.calcn",
+    "autostorage.utils",
 ]
-
-[[tool.importlinter.contracts]]
-name = "AutoStore Models Layering"
-type = "layers"
-layers = [
-    "autostorage.models.listeners",
-    "autostorage.models.reaction",
-    "autostorage.models.stationary",
-    "autostorage.models.data",
-    "autostorage.models.calculation",
-    "autostorage.models.geometry",
-    "autostorage.models.links",
-]
-
 
 # Pytest configurations
 [tool.pytest.ini_options]

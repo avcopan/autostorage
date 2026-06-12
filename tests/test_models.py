@@ -1,66 +1,81 @@
-"""Test for models module."""
+"""Test for database models."""
 
-import numpy as np
-from automol import Geometry
-from automol.geom import geometry_hash
-from qcdata import ProgramOutput
+from collections.abc import Iterator
 
-from autostorage import (
-    Calculation,
-    CalculationRow,
-    Database,
-    GeometryRow,
-    StationaryPointRow,
-)
-from autostorage.utils import verify_single_iteration
+import pytest
+
+from autostorage import Database
+from autostorage.database import StationaryPointRow
+from autostorage.models import CalculationRow, GeometryRow, ModelRow
 
 
-def test__calculation_calculation_row_equivalence(
-    calc: Calculation, calc_row: CalculationRow
+@pytest.fixture
+def model() -> ModelRow:
+    """Fixture for ModelRow."""
+    return ModelRow(
+        program="ORCA",
+        program_version="6.1.1",
+        calc_type="test",
+        method="b3lyp",
+        basis="def2-SVP",
+    )
+
+
+@pytest.fixture
+def water() -> GeometryRow:
+    """Fixture for GeometryRow."""
+    return GeometryRow(
+        symbols=["O", "H", "H"],
+        coordinates=[[0, 0, 0], [0, 0, -1], [0, 0, 1]],  # ty:ignore[invalid-argument-type]
+        charge=0,
+        spin=0,
+    )
+
+
+@pytest.fixture
+def calculation(model: ModelRow, water: GeometryRow) -> CalculationRow:
+    """Fixture for CalculationRow."""
+    return CalculationRow(model=model, output_geometry=water)
+
+
+@pytest.fixture
+def stationary_point(calculation: CalculationRow) -> StationaryPointRow:
+    """Fixture for StationaryPointRow."""
+    return StationaryPointRow(
+        calculation=calculation,
+        geometry=calculation.output_geometry,
+        order=0,
+        is_pseudo=False,
+    )
+
+
+@pytest.fixture
+def database() -> Iterator[Database]:
+    """In-memory database fixture."""
+    db = Database(":memory:")
+
+    try:
+        yield db
+
+    finally:
+        db.close()
+
+
+def test__geometry_hashing(database: Database, water: GeometryRow) -> None:
+    """Test automated hashing on GeometryRow."""
+    water.hash = None
+    database.add(water)
+    assert water.hash is not None
+
+
+def test__inchi_smiles_tagging(
+    database: Database, stationary_point: StationaryPointRow
 ) -> None:
-    """Test data persistence for Calculation -> CalculationRow."""
-    assert calc.program == calc_row.program
-    assert calc.program_keywords == calc_row.program_keywords
-    assert calc.super_program == calc_row.super_program
-    assert calc.super_keywords == calc_row.super_keywords
-    assert calc.cmdline_args == calc_row.cmdline_args
-    assert calc.calc_type == calc_row.calc_type
-    assert calc.method == calc_row.method
-    assert calc.basis == calc_row.basis
+    """Test automated inchi and smiles tags on StationaryPointRow."""
+    database.add(stationary_point)
 
+    inchi = stationary_point.identities[0]
+    smiles = inchi.identity_extras[0]
 
-def test__calculation_from_program_output(
-    blank_database: Database, prog_out: ProgramOutput
-) -> None:
-    """Test data persistence in CalculationRow -> ProgramInput -> Geometry roundtrip."""
-    calc_row = CalculationRow.from_program_output(prog_out)
-    blank_database.add(calc_row, eager_load=True)
-    assert calc_row.program == prog_out.provenance.program
-    assert calc_row.provenance.program_version == prog_out.provenance.program_version
-
-
-def test__geometry_geometry_row_equivalence(geo: Geometry) -> None:
-    """Test data persistence for Geometry -> GeometryRow."""
-    geo_row = GeometryRow.from_geometry(geo=geo)
-    assert np.array_equal(a1=geo_row.symbols, a2=geo.symbols)
-    assert np.allclose(a=geo_row.coordinates, b=geo.coordinates)
-    assert geo_row.charge == geo.charge
-    assert geo_row.spin == geo_row.spin
-
-
-def test__geometry_structure_roundtrip(geo_row: GeometryRow) -> None:
-    """Test data persistence in Geometry -> Structure -> Geometry roundtrip."""
-    struc = geo_row.structure()
-    geo_row_round_trip = GeometryRow.from_structure(struc=struc)
-    assert np.array_equal(a1=geo_row.symbols, a2=geo_row_round_trip.symbols)
-    assert np.allclose(a=geo_row.coordinates, b=geo_row_round_trip.coordinates)
-    assert geo_row.charge == geo_row_round_trip.charge
-    assert geo_row.spin == geo_row_round_trip.spin
-    assert geo_row.hash == geometry_hash(geo=geo_row_round_trip)
-
-
-def test__stationary_point_inchi(stationary_database: Database) -> None:
-    """Test InChI identity tagging upon StationaryRow addition."""
-    matches = stationary_database.find(StationaryPointRow.partial(), eager_load=True)
-    match = verify_single_iteration(matches)
-    assert match.identities  # ty:ignore[unresolved-attribute]
+    assert inchi.value == "InChI=1S/H2O/h1H2"
+    assert smiles.value == "O"

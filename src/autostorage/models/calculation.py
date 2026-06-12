@@ -1,96 +1,167 @@
 """Calculation models."""
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from qcdata import CalcType, DualProgramInput, Model, ProgramInput, ProgramOutput
-from sqlalchemy.types import JSON, String
-from sqlmodel import Column, Field, Relationship, SQLModel
+from automatics import Model
+from sqlmodel import JSON, Column, Field, Relationship, UniqueConstraint
 
-from ..calcn import Calculation
-from ..types import PathTypeDecorator, RowID
-from .optional import PartialMixin
+from .base import BaseRow
 
 if TYPE_CHECKING:
-    from .data import EnergyRow
-    from .geometry import GeometryRow
-    from .links import CalculationGeometryLink
-    from .stationary import StationaryPointRow
+    from .geom import GeometryRow, StationaryPointRow, TrajectoryRow
 
 
-class CalculationRow(PartialMixin, Calculation, SQLModel, table=True):
-    """CalculationRow input parameters and metadata.
+class ModelRow(BaseRow, Model, table=True):
+    r"""Calculation input parameters and metadata.
 
     Attributes
     ----------
-    program
+    program : str
         Quantum chemistry program used (psi4, ORCA, ...)
-    program_keywords
-        (Optional) Quantum chemistry program keywords.
-    super_program
-        (Optional) Geometry optimizer program (geomeTRIC, ...).
-    super_keywords
-        (Optional) Geometry optimizer keywords.
-    cmdline_args
-        (Optional) Command line arguments.
-    input
-        (Optional) Input file. [ PLACEHOLDER ]
-    files
-        (Optional) Additional input files. [ PLACEHOLDER ]
-    calc_type
+    program_version : str, optional
+        Quantum chemistry program version.
+    calc_type : str
         Calculation type (energy, optimization, ...)
-    method
+    method : str
         Computational method (B3LYP, MP2, ...)
-    basis
-        (Optional) Basis set.
+    basis : str, optional
+        Orbital basis set.
 
-    SQLModel Relationships
-    ----------------------
-    provenance
-        Linked ProvenanceRow.
-    geometry_links
-        List of linked CalculationGeometryLinks allowing access to Role directly.
-    hashes
-        List of linked hashes.
-    energies
-        List of linked energies.
-    stationary_points
-        List of linked stationary points.
-
-    Methods
+    Example
     -------
-    from_calculation
-        Convert Calculation to CalculationRow.
-    calculation
-        Convert CalculationRow to Calculation.
-    program_input
-        Convert CalculationRow to qcio program_input.
-    from_program_output
-        Convert qc ProgramOutput to CalculationRow.
-        Instantiates and links ProvenanceRow.
+    ```
+    opt_model = ModelRow(
+        program = "orca",
+        program_version = "6.1.1",
+        calc_type = "optimization",
+        method = "b3lyp",
+        basis = "def2-SVP",
+    )
+    ```
     """
 
-    # - SQL Metadata ------------------
+    __tablename__ = "model"
+    id: int | None = Field(default=None, primary_key=True)
+    __table_args__ = (
+        UniqueConstraint(
+            "program",
+            "program_version",
+            "calc_type",
+            "method",
+            "basis",
+            name="uix_model_identity",
+        ),
+    )
+
+    calculations: list["CalculationRow"] = Relationship(back_populates="model")
+
+
+class CalculationRow(BaseRow, table=True):
+    r"""Calculation input parameters and metadata.
+
+    Attributes
+    ----------
+    model_id : int
+        Foreign key to the calculation model.
+    input_geometry_id : int, optional
+        Foreign key to the input geometry.
+    output_geometry_id : int, optional
+        Foreign key to the output geometry.
+    input_trajectory_id : int, optional
+        Foreign key to the input trajectory.
+    output_trajectory_id : int, optional
+        Foreign key to the output trajectory.
+    input_provenance : dict, optional
+        Dictionary of input provenance fields.
+    output_provenance : dict, optional
+        Dictionary of output provenance fields.
+    model : ModelRow
+        Instance of the calculation model.
+    input_geometry : GeometryRow, optional
+        Instance of the input geometry.
+    output_geometry : GeometryRow, optional
+        Instance of the output geometry.
+    input_trajectory : TrajectoryRow, optional
+        Instance of the input trajectory.
+    output_trajectory : TrajectoryRow, optional
+        Instance of the output trajectory.
+
+    Example
+    -------
+    ```
+    from autostorage import CalculationRow, ModelRow, GeometryRow
+
+    opt_model = ModelRow(
+        program = "orca",
+        program_version = "6.1.1",
+        calc_type = "optimization",
+        method = "b3lyp",
+        basis = "def2-SVP",
+    )
+
+    inp_geo = GeometryRow(
+        symbols=["H", "H"], coordinates=[[0,0,0], [0,0,0.7]], charge=0, spin=0
+    )
+
+    opt_calc = CalculationRow(
+        model = opt_model,
+        input_geometry = inp_geo,
+        input_provenance = {"geom": {"maxiter": 500}},
+    )
+
+    out_geo, out_prov = ... # custom method for executing ORCA
+
+    opt_calc.output_geometry = out_geo
+    opt_calc.output_provenance = out_prov
+
+    db.add(opt_calc)
+    ```
+    """
+
     __tablename__ = "calculation"
-    # - Row id ------------------------
-    id: RowID | None = Field(default=None, primary_key=True)
-    # - Foreign keys ------------------
-    # - Attributes --------------------
-    # Have to redeclare these fields for sql type verification.
-    program_keywords: dict[str, Any] = Field(
+    id: int | None = Field(default=None, primary_key=True)
+
+    model_id: int | None = Field(
+        default=None, foreign_key="model.id", ondelete="CASCADE", nullable=False
+    )
+    input_geometry_id: int | None = Field(
+        default=None, foreign_key="geometry.id", ondelete="CASCADE"
+    )
+    output_geometry_id: int | None = Field(
+        default=None, foreign_key="geometry.id", ondelete="CASCADE"
+    )
+    input_trajectory_id: int | None = Field(
+        default=None, foreign_key="trajectory.id", ondelete="CASCADE"
+    )
+    output_trajectory_id: int | None = Field(
+        default=None, foreign_key="trajectory.id", ondelete="CASCADE"
+    )
+
+    input_provenance: dict[str, Any] | None = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
-    super_keywords: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    cmdline_args: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    # - SQLModel relationships --------
-    provenance: "ProvenanceRow" = Relationship(back_populates="calculation")
-    geometry_links: list["CalculationGeometryLink"] = Relationship(
-        back_populates="calculation",
-        sa_relationship_kwargs={"overlaps": "geometries"},
-        cascade_delete=True,
-    )  # overlaps acknowledges that we have a circular relationship
-    hashes: list["CalculationHashRow"] = Relationship(
-        back_populates="calculation", cascade_delete=True
+    output_provenance: dict[str, Any] | None = Field(
+        default_factory=dict, sa_column=Column(JSON)
+    )
+
+    model: "ModelRow" = Relationship(back_populates="calculations")
+    input_geometry: "GeometryRow" = Relationship(
+        back_populates="calculation_inputs",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.input_geometry_id]"},
+    )
+    output_geometry: "GeometryRow" = Relationship(
+        back_populates="calculation_outputs",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.output_geometry_id]"},
+    )
+    input_trajectory: "TrajectoryRow" = Relationship(
+        back_populates="calculation_inputs",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.input_trajectory_id]"},
+    )
+    output_trajectory: "TrajectoryRow" = Relationship(
+        back_populates="calculation_outputs",
+        sa_relationship_kwargs={
+            "foreign_keys": "[CalculationRow.output_trajectory_id]"
+        },
     )
     energies: list["EnergyRow"] = Relationship(
         back_populates="calculation", cascade_delete=True
@@ -99,265 +170,32 @@ class CalculationRow(PartialMixin, Calculation, SQLModel, table=True):
         back_populates="calculation"
     )
 
-    # - Methods -----------------------
-    @staticmethod
-    def from_calculation(
-        calc: Calculation, *, calc_type: CalcType | None = None
-    ) -> "CalculationRow":
-        """
-        Instantiate CalculationRow from Calculation.
 
-        Returns
-        -------
-        CalculationRow
-        """
-        calc_row = CalculationRow(**calc.model_dump(exclude_defaults=True))
-        if calc_type:
-            calc_row.calc_type = calc_type
-        return calc_row
-
-    def calculation(self) -> Calculation:
-        """
-        Instantiate Calculation from CalculationRow.
-
-        Returns
-        -------
-        Calculation
-        """
-        data = self.model_dump()
-
-        # Calculation doesn't care about id
-        if self.id:
-            del [data.id]  # ty:ignore[unresolved-attribute]
-
-        return Calculation(**data)
-
-    def program_input(
-        self, *, input_geo: "GeometryRow"
-    ) -> DualProgramInput | ProgramInput:
-        """
-        Generate qcdata ProgramInput from Calculation and input Geometry.
-
-        Parameters
-        ----------
-        input_geo
-            Input GeometryRow.
-
-        Returns
-        -------
-        qc DualProgramInput/ProgramInput
-        """
-        if self.super_program:
-            return DualProgramInput.model_validate(
-                {
-                    "calctype": self.calc_type,
-                    "structure": input_geo.structure(),
-                    "keywords": self.super_keywords,
-                    "subprogram": self.program,
-                    "subprogram_args": {
-                        "model": Model(method=self.method, basis=self.basis),
-                        "keywords": self.program_keywords,
-                        "cmdline_args": self.cmdline_args,
-                    },
-                }
-            )
-
-        return ProgramInput.model_validate(
-            {
-                "calctype": self.calc_type,
-                "structure": input_geo.structure(),
-                "model": Model(method=self.method, basis=self.basis),
-                "keywords": self.program_keywords,
-                "cmdline_args": self.cmdline_args,
-            }
-        )
-
-    @staticmethod
-    def from_program_output(prog_out: ProgramOutput) -> "CalculationRow":
-        """
-        Instantiate CalculationRow from qc ProgramOutput.
-
-        **Automatically instantiates and relates ProvenanceRow.
-
-        Parameters
-        ----------
-        prog_out
-            qccompute ProgramOutput.
-
-        Returns
-        -------
-        CalculationRow
-            Validated calculation row.
-        """
-        prog_inp = prog_out.input_data
-        provenance = prog_out.provenance
-
-        if isinstance(prog_inp, DualProgramInput):
-            data = {
-                "program": prog_inp.subprogram,
-                "program_keywords": prog_inp.subprogram_args.keywords,
-                "super_program": provenance.program,
-                "super_keywords": prog_inp.keywords,
-                "cmdline_args": prog_inp.subprogram_args.cmdline_args,
-                "calc_type": prog_inp.calctype.value,
-                "method": prog_inp.subprogram_args.model.method,
-                "basis": prog_inp.subprogram_args.model.basis,
-            }
-
-        else:
-            data = {
-                "program": provenance.program,
-                "program_keywords": prog_inp.keywords,
-                "cmdline_args": prog_inp.cmdline_args,
-                "calc_type": prog_inp.calctype.value,
-                "method": prog_inp.model.method,
-                "basis": prog_inp.model.basis,
-            }
-
-        calc_row = CalculationRow.model_validate(data)
-        calc_row.provenance = ProvenanceRow.from_program_output(prog_out)
-        return calc_row
-
-
-class ProvenanceRow(PartialMixin, SQLModel, table=True):
+class EnergyRow(BaseRow, table=True):
     """
-    CalculationRow output parameters and metadata.
-
-    Parameters
-    ----------
-    program_version
-        (Optional) Program version.
-    super_version
-        (Optional) Superprogram version, if applicable.
-    input
-        (Optional) Input file.
-    files
-        (Optional) Additional input files.
-    scratch_dir
-        (Optional) Working directory.
-    wall_time
-        (Optional) Compute wall time.
-    host_name
-        (Optional) Name of host machine.
-    host_cpus
-        (Optional) Number of CPUs on host machine.
-    host_mem
-        (Optional) Amount of memory on host machine.
-    extras
-        (Optional) Additional calculation metadata.
-    """
-
-    # - SQL Metadata ------------------
-    __tablename__ = "provenance"
-    # - Row id ------------------------
-    # - Foreign keys ------------------
-    calculation_id: RowID | None = Field(
-        primary_key=True,
-        default=None,
-        foreign_key="calculation.id",
-        index=True,
-        nullable=False,
-        ondelete="CASCADE",
-    )
-    # - Attributes --------------------
-    program_version: str | None = Field(default=None)
-    super_version: str | None = Field(default=None)
-    input: str | None = Field(default=None)
-    files: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    scratch_dir: Path | None = Field(default=None, sa_column=Column(PathTypeDecorator))
-    wall_time: float | None = Field(default=None)
-    host_name: str | None = Field(default=None)
-    host_cpus: int | None = Field(default=None)
-    host_mem: int | None = Field(default=None)
-    extras: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
-    # - SQLModel relationships --------
-    calculation: CalculationRow = Relationship(back_populates="provenance")
-
-    @staticmethod
-    def from_program_output(prog_out: ProgramOutput) -> "ProvenanceRow":
-        """
-        Instantiate ProvenanceRow from qc ProgramOutput.
-
-        Parameters
-        ----------
-        prog_out
-            qccompute ProgramOutput.
-
-        Returns
-        -------
-        ProvenanceRow
-            Validated provenance row.
-        """
-        prog_inp = prog_out.input_data
-        provenance = prog_out.provenance
-        data = prog_out.data
-
-        if isinstance(prog_inp, DualProgramInput):
-            traj_prov = [t.provenance for t in data.trajectory]
-            data = {
-                "program_version": traj_prov[0].program_version,
-                "super_version": provenance.program_version,
-                "input": None,  # Could be used to store .inp (or equivalent) files
-                "files": {
-                    "program": prog_inp.subprogram_args.files,
-                    "super_program": prog_inp.files,
-                },
-                "scratch_dir": provenance.scratch_dir,
-                "wall_time": provenance.wall_time,
-                "host_name": provenance.hostname,
-                "host_cpus": provenance.hostcpus,
-                "host_mem": provenance.hostmem,
-                "extras": {
-                    "super_program": prog_inp.extras,
-                    "program": prog_inp.subprogram_args.extras,
-                },
-            }
-
-        else:
-            data = {
-                "program_version": provenance.program_version,
-                "input": None,  # Could be used to store .inp (or equivalent) files
-                "files": {"program": prog_inp.files},
-                "scratch_dir": provenance.scratch_dir,
-                "wall_time": provenance.wall_time,
-                "host_name": provenance.hostname,
-                "host_cpus": provenance.hostcpus,
-                "host_mem": provenance.hostmem,
-                "extras": {"program": prog_inp.extras},
-            }
-
-        return ProvenanceRow.model_validate(data)
-
-
-class CalculationHashRow(PartialMixin, SQLModel, table=True):
-    """
-    Hash value for a calculation for identification and deduplication.
+    Results of an energy calculation for a specific geometry.
 
     Attributes
     ----------
+    geometry_id
+        Foreign key to the specific geometry.
     calculation_id
-        Foreign key to the parent CalculationRow.
-    name
-        Type of hash (e.g., 'minimal', 'full').
+        Foreign key to the calculation that produced this energy.
     value
-        The 64-character hash string.
-
-    SQLModel Relationships
-    ------------------------
-    calculation
-        The parent CalculationRow.
+        Energy value in Hartree.
     """
 
-    # - SQL Metadata ------------------
-    __tablename__ = "calculation_hash"
-    # - Row id ------------------------
-    id: RowID | None = Field(default=None, primary_key=True)
-    # - Foreign keys ------------------
-    calculation_id: RowID = Field(
-        foreign_key="calculation.id", index=True, nullable=False, ondelete="CASCADE"
+    __tablename__ = "energy"
+    id: int | None = Field(default=None, primary_key=True)
+
+    geometry_id: int | None = Field(
+        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
     )
-    # - Attributes --------------------
-    name: str = Field(index=True)
-    value: str = Field(sa_column=Column(String(64), index=True, nullable=False))
-    # - SQLModel relationships --------
-    calculation: CalculationRow = Relationship(back_populates="hashes")
+    calculation_id: int | None = Field(
+        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
+    )
+
+    value: float
+
+    calculation: "CalculationRow" = Relationship(back_populates="energies")
+    geometry: "GeometryRow" = Relationship(back_populates="energies")

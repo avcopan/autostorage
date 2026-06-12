@@ -1,45 +1,33 @@
-"""SQLModel row definitions.
+"""database tables."""
 
-Layers to avoid circular imports at load time:
-    links
-  → geometry
-  → calculation
-  → data
-  → stationary
-  → reaction
-  → listeners
-"""
-
-from . import listeners  # 1st registers @event.listens_for  # noqa: F401
-from .calculation import CalculationHashRow, CalculationRow, ProvenanceRow
-from .data import EnergyRow
-from .geometry import GeometryRow
-from .links import (
-    CalculationGeometryLink,
+from . import base
+from .calculation import CalculationRow, EnergyRow, ModelRow
+from .geom import (
+    GeometryRow,
+    IdentityExtraRow,
+    IdentityRow,
+    StageRow,
     StationaryIdentityLink,
+    StationaryPointRow,
     StationaryStageLink,
+    StepRow,
+    TrajectoryGeometryLink,
+    TrajectoryRow,
 )
-from .reaction import StageRow, StepRow
-from .stationary import IdentityRow, MetricRow, StationaryPointRow
 
 __all__ = [
-    # links
-    "CalculationGeometryLink",
-    "StationaryIdentityLink",
-    "StationaryStageLink",
-    # geometry
-    "GeometryRow",
-    # calculation
     "CalculationRow",
-    "ProvenanceRow",
-    "CalculationHashRow",
-    # data
     "EnergyRow",
-    # stationary
-    "StationaryPointRow",
+    "GeometryRow",
+    "IdentityExtraRow",
     "IdentityRow",
-    "MetricRow",
-    # reaction
+    "ModelRow",
     "StageRow",
+    "StationaryIdentityLink",
+    "StationaryPointRow",
+    "StationaryStageLink",
     "StepRow",
+    "TrajectoryGeometryLink",
+    "TrajectoryRow",
+    "base",
 ]
