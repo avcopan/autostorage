@@ -42,7 +42,7 @@ def make_fields_optional[ModelT: BaseModel](model_cls: type[ModelT]) -> type[Mod
             __module__=model_cls.__module__,
             __config__=model_cls.model_config,
             **new_fields,
-        ),  # ty:ignore[no-matching-overload]
+        ),
     )
 
 
@@ -98,8 +98,6 @@ class ComparisonMixin(BaseModel):  # noqa: PLW1641
 
 class BaseRow(SQLModel, PartialMixin, ComparisonMixin):
     """Base model for AutoStorage SQL rows."""
-
-    _extras: dict[str, Any] | None = None
 
 
 BaseRowT = TypeVar("BaseRowT", bound=BaseRow)

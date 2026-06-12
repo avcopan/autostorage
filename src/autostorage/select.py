@@ -3,7 +3,7 @@
 from sqlmodel import select
 from sqlmodel.sql.expression import SelectOfScalar
 
-from ..models.base import BaseRow, BaseRowT
+from .models.base import BaseRow, BaseRowT
 
 
 def matching_rows(row: BaseRowT) -> SelectOfScalar[BaseRowT]:

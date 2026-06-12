@@ -1,5 +1,5 @@
 """Convenience methods."""
 
-from . import exceptions, iterator, select, types
+from . import exceptions, iterator, types
 
-__all__ = ["exceptions", "iterator", "select", "types"]
+__all__ = ["exceptions", "iterator", "types"]

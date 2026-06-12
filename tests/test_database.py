@@ -1,55 +1,107 @@
 """Test for database module."""
 
+from collections.abc import Iterator
+
 import pytest
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
-from autostorage import Calculation, Database
-from autostorage.utils import select
-from autostorage.models import CalculationRow
+from autostorage import Database, select
+from autostorage.models import ModelRow
 
 
-def test__add(database: Database, calc: Calculation) -> None:
+@pytest.fixture
+def model() -> ModelRow:
+    """Fixture for ModelRow."""
+    return ModelRow(
+        program="ORCA",
+        program_version="6.1.1",
+        calc_type="test",
+        method="b3lyp",
+        basis="def2-SVP",
+    )
+
+
+@pytest.fixture
+def database() -> Iterator[Database]:
+    """In-memory database fixture."""
+    db = Database(":memory:")
+
+    try:
+        yield db
+
+    finally:
+        db.close()
+
+
+def test__add(database: Database, model: ModelRow) -> None:
     """Test add to database."""
-    calc.program = "test"
+    database.add(model)
 
-    calc_row = CalculationRow.from_calculation(calc)
-    database.add(calc_row)
-
-    assert calc_row.id
+    assert model.id
 
 
-def test__invalid_add(database: Database, calc_row: CalculationRow) -> None:
+def test__invalid_add(database: Database, model: ModelRow) -> None:
     """Test invalid add to database."""
-    calc_row.program = None  # ty:ignore[invalid-assignment]
+    model.program = None  # ty:ignore[invalid-assignment]
     with pytest.raises(IntegrityError):
-        database.add(calc_row)
+        database.add(model)
 
 
-def test__exec_first(database: Database, calc_row: CalculationRow) -> None:
+def test__delete(database: Database, model: ModelRow) -> None:
+    """Test delete from database."""
+    database.add(model)
+    stmt = select.matching_rows(model)
+    match = database.exec_one(stmt)
+    assert match
+
+    database.delete(model)
+    stmt = select.matching_rows(model)
+    with pytest.raises(NoResultFound):
+        match = database.exec_one(stmt)
+
+
+def test__get(database: Database, model: ModelRow) -> None:
+    """Test get from database."""
+    database.add(model)
+    assert model.id
+
+    match = database.get(ModelRow, model.id)
+    assert match == model
+
+
+def test__invalid_get(database: Database) -> None:
+    """Test invalid get from database."""
+    with pytest.raises(LookupError):
+        database.get(ModelRow, 679)
+
+
+def test__exec_first(database: Database, model: ModelRow) -> None:
     """Test exec first from database."""
-    stmt = select.matching_rows(calc_row)
-    database.exec_first(stmt)
-    assert calc_row.id
+    database.add(model)
+    stmt = select.matching_rows(model)
+    match = database.exec_first(stmt)
+    assert match
 
 
-def test__exec_one(database: Database, calc_row: CalculationRow) -> None:
+def test__exec_one(database: Database, model: ModelRow) -> None:
     """Test exec one from database."""
-    stmt = select.matching_rows(calc_row)
-    database.exec_one(stmt)
-    assert calc_row is not None
+    database.add(model)
+    stmt = select.matching_rows(model)
+    match = database.exec_one(stmt)
+    assert match
 
 
-def test__invalid_exec_one(database: Database, calc_row: CalculationRow) -> None:
+def test__invalid_exec_one(database: Database, model: ModelRow) -> None:
     """Test delete and invalid exec one from database."""
-    database.delete(calc_row)
-    stmt = select.matching_rows(calc_row)
+    stmt = select.matching_rows(model)
     with pytest.raises(NoResultFound):
         database.exec_one(stmt)
 
 
-def test__exec_all(database: Database) -> None:
+def test__exec_all(database: Database, model: ModelRow) -> None:
     """Test exec all from database."""
-    partial = CalculationRow.partial()
+    database.add(model)
+    partial = ModelRow.partial()
     stmt = select.matching_rows(partial)
-    for calc_row in database.exec_all(stmt):
-        assert isinstance(calc_row, CalculationRow)
+    for match in database.exec_all(stmt):
+        assert match == model

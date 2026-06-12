@@ -4,7 +4,7 @@ version = "0.0.7"
 authors = [{name = "Andreas V. Copan", email = "avcopan@uga.edu"}]
 requires-python = ">= 3.12"
 dependencies = [
-    "automatics==0.0.1",
+    "automatics==0.0.3",
     "automol==0.0.13",
     "pint>=0.25.2",
     "qcdata>=0.17.0",
@@ -60,8 +60,11 @@ exclude_type_checking_imports = true
 name = "AutoStore Layering"
 type = "layers"
 layers = [
-    "autostorage.utils",
+    "autostorage.read",
     "autostorage.database",
+    "autostorage.select",
+    "autostorage.models",
+    "autostorage.utils",
 ]
 
 [[tool.importlinter.contracts]]

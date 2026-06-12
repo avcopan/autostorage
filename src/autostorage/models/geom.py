@@ -15,39 +15,30 @@ if TYPE_CHECKING:
     from .calculation import CalculationRow, EnergyRow
 
 
-class InputGeometryLink(BaseRow, table=True):
-    """
-    Link Geometries used as inputs for Calculations.
-
-    Attributes
-    ----------
-    calculation_id
-        Foreign key to the linked calculation.
-    geometry_id
-        Foreign key to the linked geometry.
-    """
-
-    __tablename__ = "input_geometry_link"
-
-    calculation_id: int = Field(
-        foreign_key="calculation.id", primary_key=True, ondelete="CASCADE"
-    )
-    geometry_id: int = Field(
-        foreign_key="geometry.id", primary_key=True, ondelete="CASCADE"
-    )
-
-
 class TrajectoryGeometryLink(BaseRow, table=True):
     """Link Geometries produced by a trajectory."""
 
     __tablename__ = "trajectory_geometry_link"
 
-    geometry_id: int = Field(
-        foreign_key="geometry.id", primary_key=True, ondelete="CASCADE"
+    geometry_id: int | None = Field(
+        default=None,
+        foreign_key="geometry.id",
+        primary_key=True,
+        ondelete="CASCADE",
+        nullable=False,
     )
-    trajectory_id: int = Field(
-        foreign_key="trajectory.id", primary_key=True, ondelete="CASCADE"
+    trajectory_id: int | None = Field(
+        default=None,
+        foreign_key="trajectory.id",
+        primary_key=True,
+        ondelete="CASCADE",
+        nullable=False,
     )
+
+    index: list[int] | None = Field(default=None, sa_column=Column(JSON))
+
+    geometry: "GeometryRow" = Relationship(back_populates="trajectory_links")
+    trajectory: "TrajectoryRow" = Relationship(back_populates="geometry_links")
 
 
 class StationaryIdentityLink(BaseRow, table=True):
@@ -128,59 +119,25 @@ class GeometryRow(BaseRow, Geometry, table=True):
         sa_column=Column(String(64), index=True, nullable=True, unique=True),
     )
 
-    extras: list["GeometryExtraRow"] = Relationship(back_populates="geometry")
     calculation_inputs: list["CalculationRow"] = Relationship(
-        back_populates="input_geometries", link_model=InputGeometryLink
+        back_populates="input_geometry",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.input_geometry_id]"},
     )
-    parent_trajectory: "TrajectoryRow" = Relationship(
-        back_populates="geometries", link_model=TrajectoryGeometryLink
+    calculation_outputs: list["CalculationRow"] = Relationship(
+        back_populates="output_geometry",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.output_geometry_id]"},
     )
-    stationary_point: "StationaryPointRow" = Relationship(back_populates="geometry")
+    trajectory_links: list["TrajectoryGeometryLink"] = Relationship(
+        back_populates="geometry"
+    )
+    stationary_points: list["StationaryPointRow"] = Relationship(
+        back_populates="geometry"
+    )
     energies: list["EnergyRow"] = Relationship(back_populates="geometry")
 
     def xyz_block(self) -> str:
         """Write the GeometryRow to a formatted xyz block."""
         return geom.xyz_block(self)
-
-
-class GeometryExtraRow(BaseRow, table=True):
-    """
-    Extra values to attach to GeometryRow.
-
-    Attributes
-    ----------
-    identity_id
-        Foreign key to the parent identity.
-    attribute
-        Label of extra.
-    value
-        Value of extra.
-
-    Example
-    -------
-    ```
-    geo_row = GeometryRow(
-        ...
-        extras = [
-            GeometryExtraRow(
-                attribute = "frozen_coordinate", value = "B 0 1 = 1.93"
-            )
-        ]
-    )
-    ```
-    """
-
-    __tablename__ = "geometry_extras"
-    id: int | None = Field(default=None, primary_key=True)
-
-    geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
-    )
-
-    attribute: str
-    value: str
-
-    geometry: "GeometryRow" = Relationship(back_populates="extras")
 
 
 class TrajectoryRow(BaseRow, table=True):
@@ -198,13 +155,63 @@ class TrajectoryRow(BaseRow, table=True):
     __tablename__ = "trajectory"
     id: int | None = Field(default=None, primary_key=True)
 
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
-    )
+    ndim: int = 0
 
-    calculation: "CalculationRow" = Relationship(back_populates="trajectories")
-    geometries: list["GeometryRow"] = Relationship(
-        back_populates="parent_trajectory", link_model=TrajectoryGeometryLink
+    @property
+    def geometries(self) -> list["GeometryRow"]:
+        """Linked geometries."""
+        return [
+            link.geometry
+            for link in sorted(
+                self.geometry_links,
+                key=lambda link: link.index if link.index is not None else [],
+            )
+        ]
+
+    @geometries.setter
+    def geometries(self, value: list["GeometryRow"]) -> None:
+        """Set linked geometries."""
+        self.geometry_links = [TrajectoryGeometryLink(geometry=geom) for geom in value]
+
+    @classmethod
+    def from_geometries(
+        cls, geos: list["GeometryRow"], indices: list[int | list[int]] | None = None
+    ) -> "TrajectoryRow":
+        """Instantiate TrajectoryRow from geometries with optional indices."""
+        links: list[TrajectoryGeometryLink] = []
+        ndim = 0
+
+        if indices is not None:
+            normalized_indices: list[list[int]] = [
+                [item] if isinstance(item, int) else item for item in indices
+            ]
+            if len(normalized_indices) != len(geos):
+                msg = "The number of indices must match the number of geometries."
+                raise ValueError(msg)
+
+            if normalized_indices:
+                ndim = len(normalized_indices[0])
+        else:
+            normalized_indices = None
+
+        for i, geo in enumerate(geos):
+            idx = normalized_indices[i] if normalized_indices is not None else None
+            links.append(TrajectoryGeometryLink(geometry=geo, index=idx))
+
+        return cls(geometry_links=links, ndim=ndim)
+
+    calculation_inputs: list["CalculationRow"] = Relationship(
+        back_populates="input_trajectory",
+        sa_relationship_kwargs={"foreign_keys": "[CalculationRow.input_trajectory_id]"},
+    )
+    calculation_outputs: list["CalculationRow"] = Relationship(
+        back_populates="output_trajectory",
+        sa_relationship_kwargs={
+            "foreign_keys": "[CalculationRow.output_trajectory_id]"
+        },
+    )
+    geometry_links: list["TrajectoryGeometryLink"] = Relationship(
+        back_populates="trajectory"
     )
 
 
@@ -247,7 +254,7 @@ class StationaryPointRow(BaseRow, table=True):
     order: int = 0
     is_pseudo: bool = False
 
-    geometry: "GeometryRow" = Relationship(back_populates="stationary_point")
+    geometry: "GeometryRow" = Relationship(back_populates="stationary_points")
     calculation: "CalculationRow" = Relationship(back_populates="stationary_points")
     identities: list["IdentityRow"] = Relationship(
         back_populates="stationary_points", link_model=StationaryIdentityLink
@@ -394,7 +401,8 @@ class StepRow(BaseRow, table=True):
 
 
 @event.listens_for(Session, "before_flush")
-def add_inchi_identities(session, flush_context, instances):
+def add_inchi_identities(session, flush_context, instances) -> None:  # noqa: ANN001, ARG001
+    """Add InChI and SMILES to new stationary point rows."""
     for obj in session.new:
         if not isinstance(obj, StationaryPointRow):
             continue
