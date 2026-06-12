@@ -14,7 +14,7 @@ automol = "==0.0.14"  # local:false
 
 [package]
 name = "autostorage"
-version = "0.0.7"
+version = "0.0.8"
 
 [package.build]
 backend = { name = "pixi-build-python", version = "*" }
