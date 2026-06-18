@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+- `calculate` module for calculating properties of database rows.
+- `GradientRow` and `HessianRow` for storing respective values.
+- Event listeners for validating shape of gradient and Hessian values.
+- `ValidationRow` for assocating validation calculations (such as `Intrinsic Reaction Coordinate`) with elementary steps.
+- `ModelRow.hash` (from `automatics`) as a unique constraint.
+- `query` module combining `select` statements and `db.exec` methods for convenience.
+- `xyzrender` as a dev / optional dependency.
+
+### Changed
+- Bump `automatics` to v0.0.6,
+- Bump `automol` to v0.0.16.
+
+### Fixed
+- Tests to reflect changes.
+
+### Removed
+- `read` module in favor of class methods.
 
 ## [0.0.8] - 2026-06-12
 ### Added

@@ -9,7 +9,6 @@ __all__ = [
     "database",
     "iterator",
     "query",
-    "read",
     "select",
     "utils",
 ]
