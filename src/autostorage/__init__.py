@@ -1,6 +1,15 @@
 """Interface for database storage."""
 
-from . import database, models, read, select, utils
+from . import calculate, database, query, select, utils
 from .database import Database
 
-__all__ = ["Database", "database", "iterator", "models", "read", "select", "utils"]
+__all__ = [
+    "Database",
+    "calculate",
+    "database",
+    "iterator",
+    "query",
+    "read",
+    "select",
+    "utils",
+]

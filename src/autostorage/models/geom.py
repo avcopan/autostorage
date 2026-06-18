@@ -1,22 +1,45 @@
 """Geometry models."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from automatics import Geometry, Identity, geom
+from automatics import Identity
 from automatics.utils.types import FloatArray
-from sqlalchemy import event
+from automol import Geometry, geom
+from pydantic import model_validator
+from sqlalchemy import CheckConstraint, event, insert
 from sqlalchemy.types import JSON, String
 from sqlmodel import Column, Field, Relationship, Session, select
 
-from ..utils.types import FloatArrayTypeDecorator
+from ..utils.types import FloatArrayTypeDecorator, TrajectoryIndices
 from .base import BaseRow
 
 if TYPE_CHECKING:
-    from .calculation import CalculationRow, EnergyRow
+    from .calculation import (
+        CalculationRow,
+        EnergyRow,
+        GradientRow,
+        HessianRow,
+        ValidationRow,
+    )
 
 
 class TrajectoryGeometryLink(BaseRow, table=True):
-    """Link Geometries produced by a trajectory."""
+    """Association table linking geometries to a trajectory.
+
+    Attributes
+    ----------
+    geometry_id : int
+        Foreign key to the linked geometry.
+    trajectory_id : int
+        Foreign key to the linked trajectory.
+    index : list[int], optional
+        Position of the geometry within the trajectory.
+    geometry : GeometryRow
+        The linked geometry.
+    trajectory : TrajectoryRow
+        The linked trajectory.
+    """
 
     __tablename__ = "trajectory_geometry_link"
 
@@ -42,14 +65,13 @@ class TrajectoryGeometryLink(BaseRow, table=True):
 
 
 class StationaryIdentityLink(BaseRow, table=True):
-    """
-    Link StationaryPointRow to IdentityRow.
+    """Association table linking stationary points to chemical identities.
 
     Attributes
     ----------
-    stationary_id
+    stationary_id : int
         Foreign key to the linked stationary point.
-    identity_id
+    identity_id : int
         Foreign key to the linked identity.
     """
 
@@ -64,14 +86,13 @@ class StationaryIdentityLink(BaseRow, table=True):
 
 
 class StationaryStageLink(BaseRow, table=True):
-    """
-    Link StationaryPointRows to StageRows.
+    """Association table linking stationary points to reaction stages.
 
     Attributes
     ----------
-    stationary_id
+    stationary_id : int
         Foreign key to the linked stationary point.
-    stage_id
+    stage_id : int
         Foreign key to the linked reaction stage.
     """
 
@@ -83,28 +104,58 @@ class StationaryStageLink(BaseRow, table=True):
     stage_id: int = Field(foreign_key="stage.id", primary_key=True, ondelete="CASCADE")
 
 
-class GeometryRow(BaseRow, Geometry, table=True):
-    """
-    Molecular geometry definition and metadata.
+class StepValidationLink(BaseRow, table=True):
+    """Association table linking validations to a step.
 
     Attributes
     ----------
-    symbols
-        List of atomic symbols in order.
-    coordinates
+    step_id : int
+        Foreign key to the linked step.
+    validation_id : int
+        Foreign key to the linked validation.
+    step : StepRow
+        The linked step.
+    validation : ValidationRow
+        The linked validation.
+    """
+
+    __tablename__ = "step_validation_link"
+
+    step_id: int = Field(foreign_key="step.id", primary_key=True, ondelete="CASCADE")
+    validation_id: int = Field(
+        foreign_key="validation.id", primary_key=True, ondelete="CASCADE"
+    )
+
+
+class GeometryRow(BaseRow, Geometry, table=True):
+    """Molecular geometry definition and metadata.
+
+    Attributes
+    ----------
+    symbols : list[str]
+        Atomic symbols in order.
+    coordinates : FloatArray
         Atomic coordinates in Angstrom.
-    charge
+    charge : int
         Total molecular charge.
-    spin
+    spin : int
         Number of unpaired electrons (2S).
-    hash
-        Unique hash of the geometry for indexing.
-    calculations
-        List of Calculations using GeometryRow instance as an input.
-    energies
-        List of calculated energies for this geometry.
-    stationary_points
-        StationaryPointRow associated with this geometry.
+    hash : str, optional
+        Unique hash of the geometry used for deduplication.
+    calculation_inputs : list[CalculationRow]
+        Calculations that used this geometry as input.
+    calculation_outputs : list[CalculationRow]
+        Calculations that produced this geometry.
+    energies : list[EnergyRow]
+        Energies evaluated at this geometry.
+    gradients : list[GradientRow]
+        Gradients evaluated at this geometry.
+    hessians : list[HessianRow]
+        Hessians evaluated at this geometry.
+    stationary_points : list[StationaryPointRow]
+        Stationary points associated with this geometry.
+    trajectory_links : list[TrajectoryGeometryLink]
+        Trajectory membership links for this geometry.
     """
 
     __tablename__ = "geometry"
@@ -134,22 +185,27 @@ class GeometryRow(BaseRow, Geometry, table=True):
         back_populates="geometry"
     )
     energies: list["EnergyRow"] = Relationship(back_populates="geometry")
-
-    def xyz_block(self) -> str:
-        """Write the GeometryRow to a formatted xyz block."""
-        return geom.xyz_block(self)
+    gradients: list["GradientRow"] = Relationship(back_populates="geometry")
+    hessians: list["HessianRow"] = Relationship(back_populates="geometry")
 
 
 class TrajectoryRow(BaseRow, table=True):
-    """
-    Trajectory primary container.
+    """Ordered sequence of geometries from a calculation trajectory.
 
     Attributes
     ----------
-    id
+    id : int, optional
         Primary key.
-    [SQL] calculation
-        Parent calculation.
+    ndim : int
+        Dimensionality of the trajectory index (e.g. 1 for a linear scan).
+    geometries : list[GeometryRow]
+        Ordered list of geometries in this trajectory.
+    geometry_links : list[TrajectoryGeometryLink]
+        Raw link rows connecting geometries to this trajectory.
+    calculation_inputs : list[CalculationRow]
+        Calculations that used this trajectory as input.
+    calculation_outputs : list[CalculationRow]
+        Calculations that produced this trajectory.
     """
 
     __tablename__ = "trajectory"
@@ -175,7 +231,7 @@ class TrajectoryRow(BaseRow, table=True):
 
     @classmethod
     def from_geometries(
-        cls, geos: list["GeometryRow"], indices: list[int | list[int]] | None = None
+        cls, geos: list["GeometryRow"], indices: TrajectoryIndices | None = None
     ) -> "TrajectoryRow":
         """Instantiate TrajectoryRow from geometries with optional indices."""
         links: list[TrajectoryGeometryLink] = []
@@ -200,6 +256,53 @@ class TrajectoryRow(BaseRow, table=True):
 
         return cls(geometry_links=links, ndim=ndim)
 
+    @classmethod
+    def from_xyz_block(
+        cls,
+        xyz_block: str,
+        indices: TrajectoryIndices | None = None,
+        *,
+        charge: int | None = None,
+        spin: int | None = None,
+    ) -> "TrajectoryRow":
+        """Instantiate GeometryRow from a formatted xyz block."""
+        lines = xyz_block.splitlines()
+
+        natoms = int(lines[0])
+        block_size: int = natoms + 2
+        nblocks = int(len(lines) / block_size)
+
+        geos = []
+
+        for i in range(nblocks):
+            start = block_size * i
+            end = block_size * (i + 1)
+            xyz_block = "\n".join(lines[start:end])
+            geo = GeometryRow.from_xyz_block(xyz_block, charge=charge, spin=spin)
+
+            if geo.atom_count != natoms:
+                msg = "Failed to read trajectory from xyz block."
+                raise ValueError(msg)
+
+            geos.append(geo)
+
+        return cls.from_geometries(geos, indices=indices)
+
+    @classmethod
+    def from_xyz_file(
+        cls,
+        path: str | Path,
+        indices: TrajectoryIndices | None = None,
+        *,
+        charge: int | None = None,
+        spin: int | None = None,
+    ) -> "TrajectoryRow":
+        """Instantiate GeometryRow from a formatted xyz block."""
+        path = Path(path)
+        return cls.from_xyz_block(
+            path.read_text(), indices=indices, charge=charge, spin=spin
+        )
+
     calculation_inputs: list["CalculationRow"] = Relationship(
         back_populates="input_trajectory",
         sa_relationship_kwargs={"foreign_keys": "[CalculationRow.input_trajectory_id]"},
@@ -216,28 +319,25 @@ class TrajectoryRow(BaseRow, table=True):
 
 
 class StationaryPointRow(BaseRow, table=True):
-    """
-    Definition of a stationary point on a potential energy surface.
+    """A stationary point on a potential energy surface.
 
     Attributes
     ----------
-    geometry_id
+    geometry_id : int
         Foreign key to the underlying molecular geometry.
-    calculation_id
-        Foreign key to the calculation identifying this point.
-    order
-        Hessian index (0 for minima, 1 for saddle points).
-    is_pseudo
-        Flag for points that are not true stationary points (e.g., constrained).
-    [SQL] geometry
-        GeometryRow defining the point's coordinates.
-    [SQL] calculation
-        Parent CalculationRow.
-    [SQL] identities
-        List of chemical identifiers (InChI, etc.).
-    [SQL] metrics
-        Comparison metrics (conformer analysis).
-    [SQL] stages
+    calculation_id : int
+        Foreign key to the calculation that identified this point.
+    order : int
+        Hessian index (0 for minima, 1 for first-order saddle points).
+    is_pseudo : bool
+        Whether this point is not a true stationary point (e.g. constrained).
+    geometry : GeometryRow
+        Geometry defining the coordinates of this point.
+    calculation : CalculationRow
+        Calculation that identified this point.
+    identities : list[IdentityRow]
+        Chemical identifiers (e.g. InChI, SMILES) for this point.
+    stages : list[StageRow]
         Reaction stages this stationary point belongs to.
     """
 
@@ -250,12 +350,16 @@ class StationaryPointRow(BaseRow, table=True):
     calculation_id: int | None = Field(
         default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
     )
+    hessian_id: int | None = Field(default=None, foreign_key="hessian.id")
 
     order: int = 0
     is_pseudo: bool = False
+    is_valid: bool = False
 
     geometry: "GeometryRow" = Relationship(back_populates="stationary_points")
     calculation: "CalculationRow" = Relationship(back_populates="stationary_points")
+    hessian: "HessianRow" = Relationship(back_populates="stationary_point")
+
     identities: list["IdentityRow"] = Relationship(
         back_populates="stationary_points", link_model=StationaryIdentityLink
     )
@@ -263,21 +367,29 @@ class StationaryPointRow(BaseRow, table=True):
         back_populates="stationary_points", link_model=StationaryStageLink
     )
 
+    @model_validator(mode="after")
+    def valid_hessian(self) -> None:
+        """Validate that a Hessian is provided if marking stationary point as valid."""
+        if self.is_valid and not (self.hessian_id or self.hessian):
+            msg = "StationaryPoint cannot be valid without an associated Hessian."
+            raise ValueError(msg)
+
 
 class IdentityRow(BaseRow, Identity, table=True):
-    """
-    Chemical identifiers for stationary points.
+    """A chemical identifier associated with one or more stationary points.
 
     Attributes
     ----------
-    kind
-        Category of identity (e.g., 'stereoisomer', 'formula').
-    algorithm
-        The method used (e.g., 'InChI', 'SMILES').
-    value
-        The resulting string identifier.
-    [SQL] stationary_points
+    kind : str
+        Category of identifier (e.g. ``stereoisomer``, ``formula``).
+    algorithm : str
+        Method used to generate the identifier (e.g. ``rdkit inchi``, ``rdkit smiles``).
+    value : str
+        The resulting identifier string.
+    stationary_points : list[StationaryPointRow]
         Stationary points sharing this identity.
+    identity_extras : list[IdentityExtraRow]
+        Additional key-value metadata attached to this identity.
     """
 
     __tablename__ = "identity"
@@ -290,17 +402,18 @@ class IdentityRow(BaseRow, Identity, table=True):
 
 
 class IdentityExtraRow(BaseRow, table=True):
-    """
-    Extra values to attach to stationary point identity entry.
+    """Additional key-value metadata attached to a chemical identity.
 
     Attributes
     ----------
-    identity_id
+    identity_id : int
         Foreign key to the parent identity.
-    attribute
-        Label of extra.
-    value
-        Value of extra.
+    attribute : str
+        Name of the extra attribute.
+    value : str
+        Value of the extra attribute.
+    identity : IdentityRow
+        The parent identity this extra belongs to.
     """
 
     __tablename__ = "identity_extras"
@@ -317,37 +430,38 @@ class IdentityExtraRow(BaseRow, table=True):
 
 
 class StageRow(BaseRow, table=True):
-    """
-    A specific chemical state (reactant, product, or TS) in a reaction.
+    """A chemical state (reactant, product, or transition state) in a reaction.
 
     Attributes
     ----------
-    is_ts
+    is_ts : bool
         Whether this stage represents a transition state.
-    [SQL] steps_1, steps_2
-        Connection to StepRows where this stage is a reactant or product.
-    [SQL] steps_ts
-        Connection to StepRows where this stage is the transition state.
-    [SQL] stationary_points
-        Geometries mapped to this reaction stage.
+    backward_steps : list[StepRow]
+        Elementary steps where this stage is the reactant.
+    transition_steps : list[StepRow]
+        Elementary steps where this stage is the transition state.
+    forward_steps : list[StepRow]
+        Elementary steps where this stage is the product.
+    stationary_points : list[StationaryPointRow]
+        Stationary point geometries mapped to this stage.
     """
 
     __tablename__ = "stage"
     id: int | None = Field(default=None, primary_key=True)
 
-    is_ts: bool = Field(description="Stage represents transition state.")
+    is_ts: bool = False
 
-    reactant_steps: list["StepRow"] = Relationship(
-        back_populates="reactant_stage",
-        sa_relationship_kwargs={"foreign_keys": "[StepRow.reactant_stage_id]"},
+    backward_steps: list["StepRow"] = Relationship(
+        back_populates="backward_stage",
+        sa_relationship_kwargs={"foreign_keys": "[StepRow.backward_stage_id]"},
     )
     transition_steps: list["StepRow"] = Relationship(
         back_populates="transition_stage",
         sa_relationship_kwargs={"foreign_keys": "[StepRow.transition_stage_id]"},
     )
-    product_steps: list["StepRow"] = Relationship(
-        back_populates="product_stage",
-        sa_relationship_kwargs={"foreign_keys": "[StepRow.product_stage_id]"},
+    forward_steps: list["StepRow"] = Relationship(
+        back_populates="forward_stage",
+        sa_relationship_kwargs={"foreign_keys": "[StepRow.forward_stage_id]"},
     )
     stationary_points: list["StationaryPointRow"] = Relationship(
         back_populates="stages", link_model=StationaryStageLink
@@ -355,62 +469,78 @@ class StageRow(BaseRow, table=True):
 
 
 class StepRow(BaseRow, table=True):
-    """
-    An elementary reaction step connecting multiple stages.
+    """An elementary reaction step connecting a reactant, transition state, and product.
 
     Attributes
     ----------
-    stage_id1
-        Foreign key to the first reactant/product stage.
-    stage_id2
-        Foreign key to the second reactant/product stage.
-    stage_id_ts
+    backward_stage_id : int
+        Foreign key to the reactant stage.
+    transition_stage_id : int
         Foreign key to the transition state stage.
-    is_barrierless
-        Flag for reactions without a formal transition state.
-    [SQL] stage1, stage2, stage_ts
-        The specific StageRows linked by this step.
+    forward_stage_id : int, optional
+        Foreign key to the product stage.
+    is_barrierless : bool
+        Whether this step proceeds without a formal transition state.
+    backward_stage : StageRow
+        The reactant stage for this step.
+    transition_stage : StageRow
+        The transition state stage for this step.
+    forward_stage : StageRow, optional
+        The product stage for this step.
     """
 
     __tablename__ = "step"
+    __table_args__ = (
+        CheckConstraint(
+            "(is_barrierless = TRUE AND transition_stage_id IS NULL) OR "
+            "(is_barrierless = FALSE AND transition_stage_id IS NOT NULL)",
+            name="check_barrierless_or_transition",
+        ),
+    )
     id: int | None = Field(default=None, primary_key=True)
 
-    reactant_stage_id: int | None = Field(
+    backward_stage_id: int | None = Field(
         default=None, foreign_key="stage.id", index=True, nullable=False
     )
     transition_stage_id: int | None = Field(
         default=None, foreign_key="stage.id", index=True, nullable=False
     )
-    product_stage_id: int | None = Field(
+    forward_stage_id: int | None = Field(
         default=None, foreign_key="stage.id", index=True, nullable=True
     )
-    is_barrierless: bool
+    is_barrierless: bool = False
 
-    reactant_stage: "StageRow" = Relationship(
-        back_populates="reactant_steps",
-        sa_relationship_kwargs={"foreign_keys": "[StepRow.reactant_stage_id]"},
+    backward_stage: "StageRow" = Relationship(
+        back_populates="backward_steps",
+        sa_relationship_kwargs={"foreign_keys": "[StepRow.backward_stage_id]"},
     )
     transition_stage: "StageRow" = Relationship(
         back_populates="transition_steps",
         sa_relationship_kwargs={"foreign_keys": "[StepRow.transition_stage_id]"},
     )
-    product_stage: "StageRow" = Relationship(
-        back_populates="product_steps",
-        sa_relationship_kwargs={"foreign_keys": "[StepRow.product_stage_id]"},
+    forward_stage: "StageRow" = Relationship(
+        back_populates="forward_steps",
+        sa_relationship_kwargs={"foreign_keys": "[StepRow.forward_stage_id]"},
+    )
+    validations: list["ValidationRow"] = Relationship(
+        back_populates="step", link_model=StepValidationLink
     )
 
 
 @event.listens_for(Session, "before_flush")
 def add_inchi_identities(session, flush_context, instances) -> None:  # noqa: ANN001, ARG001
-    """Add InChI and SMILES to new stationary point rows."""
+    """Attach InChI and SMILES identities to new stationary point rows before flush."""
     for obj in session.new:
         if not isinstance(obj, StationaryPointRow):
             continue
-
-        inchi_row = IdentityRow.from_geometry(
-            geo=obj.geometry,
-            algorithm="rdkit inchi",
-        )
+        try:
+            inchi_row = IdentityRow.from_geometry(
+                geo=obj.geometry,
+                algorithm="rdkit inchi",
+            )
+        except ValueError:
+            # NOTE: Add logger
+            continue
 
         existing = session.exec(
             select(IdentityRow).where(
@@ -439,7 +569,41 @@ def add_inchi_identities(session, flush_context, instances) -> None:  # noqa: AN
 
 
 @event.listens_for(GeometryRow, "before_insert")
-def on_geometry_insert(mapper, connection, target: GeometryRow) -> None:  # noqa: ANN001, ARG001
-    """Auto-tag InChI identity after inserting a StationaryPoint."""
+@event.listens_for(GeometryRow, "before_update")
+def ensure_geometry_hash(mapper, connection, target: GeometryRow) -> None:  # noqa: ANN001, ARG001
+    """Compute and assign the geometry hash before inserting a GeometryRow."""
     if target.hash is None:
         target.hash = geom.geometry_hash(target)
+
+
+@event.listens_for(StationaryPointRow, "before_insert")
+@event.listens_for(StationaryPointRow, "before_update")
+def validate_stationary_order(mapper, connection, target: StationaryPointRow) -> None:  # noqa: ANN001
+    """Compute hessian frequencies and verify stationary point order before insert."""
+    if target.is_valid and target.hessian_id is None:
+        msg = "StationaryPoint cannot be valid without an associated Hessian."
+        raise ValueError(msg)
+
+    hess = target.hessian
+    if not hess:
+        return
+
+    freq, _ = geom.vibrational_analysis(target.geometry, hess.value)
+    hess_order = sum(1 for f in freq if f < 0)
+
+    if target.order != hess_order:
+        target.is_valid = False
+
+        stmt = insert(mapper.local_table).values(
+            geometry_id=target.geometry_id,
+            calculation_id=target.calculation_id,
+            hessian_id=target.hessian_id,
+            order=hess_order,
+            is_pseudo=target.is_pseudo,
+            is_valid=True,
+        )
+
+        connection.execute(stmt)
+
+    else:
+        target.is_valid = True

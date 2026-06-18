@@ -7,8 +7,7 @@ from .models.base import BaseRow, BaseRowT
 
 
 def matching_rows(row: BaseRowT) -> SelectOfScalar[BaseRowT]:
-    """
-    Write a statement for matching rows.
+    """Write select statement for matching rows.
 
     Queried fields are dictated by the model_fields_set attribute in Pydantic.
 
@@ -35,8 +34,7 @@ def matching_rows(row: BaseRowT) -> SelectOfScalar[BaseRowT]:
 def linked_rows[T1: BaseRow, T2: BaseRow, T3: BaseRow](
     row1: T1, row2: T2, link: T3
 ) -> SelectOfScalar[T3]:
-    """
-    Select rows connecting two model instances.
+    """Write select statement for rows connected by a link.
 
     Parameters
     ----------

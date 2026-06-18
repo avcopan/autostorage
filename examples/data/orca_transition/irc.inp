@@ -1,0 +1,11 @@
+%PAL NPROCS 8 END
+%MAXCORE 4000
+
+! M062X def2-TZVPP def2-TZVPP/c IRC
+
+%irc
+    InitHess read
+    Hess_Filename "freq.hess"
+end
+
+*xyzfile 0 2 freq.xyz

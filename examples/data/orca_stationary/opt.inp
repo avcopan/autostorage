@@ -1,0 +1,7 @@
+%PAL NPROCS 8 END
+%MAXCORE 4000
+%base "opt"
+! WB97X-3C OPT
+
+*xyzfile 0 2 goat.xyz
+

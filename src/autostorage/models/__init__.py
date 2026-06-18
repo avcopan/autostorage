@@ -1,7 +1,14 @@
 """database tables."""
 
 from . import base
-from .calculation import CalculationRow, EnergyRow, ModelRow
+from .calculation import (
+    CalculationRow,
+    EnergyRow,
+    GradientRow,
+    HessianRow,
+    ModelRow,
+    ValidationRow,
+)
 from .geom import (
     GeometryRow,
     IdentityExtraRow,
@@ -11,6 +18,7 @@ from .geom import (
     StationaryPointRow,
     StationaryStageLink,
     StepRow,
+    StepValidationLink,
     TrajectoryGeometryLink,
     TrajectoryRow,
 )
@@ -19,6 +27,8 @@ __all__ = [
     "CalculationRow",
     "EnergyRow",
     "GeometryRow",
+    "GradientRow",
+    "HessianRow",
     "IdentityExtraRow",
     "IdentityRow",
     "ModelRow",
@@ -27,7 +37,9 @@ __all__ = [
     "StationaryPointRow",
     "StationaryStageLink",
     "StepRow",
+    "StepValidationLink",
     "TrajectoryGeometryLink",
     "TrajectoryRow",
+    "ValidationRow",
     "base",
 ]

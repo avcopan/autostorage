@@ -6,19 +6,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
 from autostorage import Database, select
-from autostorage.models import ModelRow
-
-
-@pytest.fixture
-def model() -> ModelRow:
-    """Fixture for ModelRow."""
-    return ModelRow(
-        program="ORCA",
-        program_version="6.1.1",
-        calc_type="test",
-        method="b3lyp",
-        basis="def2-SVP",
-    )
+from autostorage.database import ModelRow
 
 
 @pytest.fixture
@@ -31,6 +19,18 @@ def database() -> Iterator[Database]:
 
     finally:
         db.close()
+
+
+@pytest.fixture
+def model() -> ModelRow:
+    """Fixture for ModelRow."""
+    return ModelRow(
+        program="ORCA",
+        program_version="6.1.1",
+        calc_type="test",
+        method="b3lyp",
+        basis="def2-SVP",
+    )
 
 
 def test__add(database: Database, model: ModelRow) -> None:

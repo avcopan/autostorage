@@ -7,8 +7,8 @@ authors = [
 ]
 requires-python = ">= 3.12"
 dependencies = [
-    "automatics==0.0.4",
-    "automol==0.0.14",
+    "automatics==0.0.6",
+    "automol==0.0.16",
     "pint>=0.25.2",
     "qcdata>=0.17.0",
     "sqlmodel>=0.0.31",
@@ -50,6 +50,7 @@ python = ".pixi/envs/dev/bin/python"
 
 [tool.ty.src]
 include = [
+    "examples",
     "src",
     "tests",
 ]
@@ -63,7 +64,7 @@ exclude_type_checking_imports = true
 name = "Autostorage Layering"
 type = "layers"
 layers = [
-    "autostorage.read",
+    "autostorage.query",
     "autostorage.database",
     "autostorage.select",
     "autostorage.models",

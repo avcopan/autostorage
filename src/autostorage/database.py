@@ -54,6 +54,7 @@ class Database:
             session.add(row)
             session.commit()
             session.refresh(row)
+
             return row
 
     def delete(self, row: BaseRowT) -> None:

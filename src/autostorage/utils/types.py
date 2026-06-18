@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from sqlalchemy.types import JSON, String, TypeDecorator
 
+TrajectoryIndices = list[int | list[int]]
+
 
 class FloatArrayTypeDecorator(TypeDecorator):
     """SQLAlchemy NDArray -> JSON type decorator."""
