@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+- `events.py` to house custom `sqlalchemy` events.
+- `exc.py` for custom `Exception` classes.
+- `types.py` for custom Typing.
+- `CalcType` class for `CalculationRow.calc_type` normalization.
+
+### Changed
+- `models/` -> `models.py` to consolidate logic and address circular import concerns.
+- `BaseRow` for standard auto-incremented ID tables to provide a `.save()` method.
+- `BaseHashedRow` for hashed tables to provide a `.resolve()` method, searching the database for matching hashes.
+- `BaseResultRow` for result tables (`EnergyRow`, `GradientRow`, `HessianRow`) to provide a `.query()` method, searching the database for existing results.
+- `BaseLink` for non-incremented ID tables (e.g., Links) to provide a `.save()` method.
+- Adjust fields and relationships on several table models.
+
+### Fixed
+- `examples` to reflect changes.
+- `tests` to reflect changes.
+
+### Removed
+- `calculate` module in favor of direct calls to `automol`.
+- `query.py` and `select.py` in favor of class methods on table models.
+- `PartialMixIn` due to type safety concerns.
+- `ComparisonMixIn`.
+- `automatics` dependency (discontinued package).
 
 ## [0.0.9] - 2026-06-18
 ### Added

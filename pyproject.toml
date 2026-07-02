@@ -7,10 +7,8 @@ authors = [
 ]
 requires-python = ">= 3.12"
 dependencies = [
-    "automatics==0.0.6",
-    "automol==0.0.16",
+    "automol==0.0.18",
     "pint>=0.25.2",
-    "qcdata>=0.17.0",
     "sqlmodel>=0.0.31",
 ]
 
@@ -64,11 +62,11 @@ exclude_type_checking_imports = true
 name = "Autostorage Layering"
 type = "layers"
 layers = [
-    "autostorage.query",
-    "autostorage.database",
-    "autostorage.select",
-    "autostorage.models",
     "autostorage.utils",
+    "autostorage.database",
+    "autostorage.events",
+    "autostorage.models",
+    "autostorage.types | autostorage.exc",
 ]
 
 # Pytest configurations
