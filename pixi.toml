@@ -5,9 +5,7 @@ preview = ["pixi-build"]
 
 [dependencies]
 autostorage = { path = "." }
-automatics = "==0.0.6" # local:false
-# automatics = { path = "../automatics" } # local:true
-automol = "==0.0.16"  # local:false
+automol = "==0.0.18"  # local:false
 # automol = { path = "../automol" }  # local:true
 
 [pypi-dependencies]
@@ -41,7 +39,6 @@ ipykernel = "*"
 
 [feature.dev.pypi-dependencies]
 keepachangelog = "*"
-qcdata = ">=0.17.1, <0.18"
 xyzrender = ">=0.3.1, <0.4"
 
 [feature.docs.dependencies]

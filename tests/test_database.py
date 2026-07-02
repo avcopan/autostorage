@@ -1,72 +1,41 @@
 """Test for database module."""
 
-from collections.abc import Iterator
-
 import pytest
 from sqlalchemy.exc import IntegrityError, NoResultFound
 
-from autostorage import Database, select
-from autostorage.database import ModelRow
+from autostorage import Database
+from autostorage.database import ModelRow, Select, SelectStatement
 
 
-@pytest.fixture
-def database() -> Iterator[Database]:
-    """In-memory database fixture."""
-    db = Database(":memory:")
-
-    try:
-        yield db
-
-    finally:
-        db.close()
-
-
-@pytest.fixture
-def model() -> ModelRow:
-    """Fixture for ModelRow."""
-    return ModelRow(
-        program="ORCA",
-        program_version="6.1.1",
-        calc_type="test",
-        method="b3lyp",
-        basis="def2-SVP",
-    )
-
-
-def test__add(database: Database, model: ModelRow) -> None:
+def test__add(database: Database, model_row: ModelRow) -> None:
     """Test add to database."""
-    database.add(model)
+    database.add(model_row)
+    database.commit()
 
-    assert model.id
+    assert model_row.id
 
 
-def test__invalid_add(database: Database, model: ModelRow) -> None:
+def test__invalid_add(database: Database, model_row: ModelRow) -> None:
     """Test invalid add to database."""
-    model.program = None  # ty:ignore[invalid-assignment]
+    model_row2 = model_row.model_copy(deep=True)
+
+    database.add(model_row)
+    database.commit()
+
+    # Violate hash uniqueness
+    database.add(model_row2)
     with pytest.raises(IntegrityError):
-        database.add(model)
+        database.commit()
 
 
-def test__delete(database: Database, model: ModelRow) -> None:
-    """Test delete from database."""
-    database.add(model)
-    stmt = select.matching_rows(model)
-    match = database.exec_one(stmt)
-    assert match
-
-    database.delete(model)
-    stmt = select.matching_rows(model)
-    with pytest.raises(NoResultFound):
-        match = database.exec_one(stmt)
-
-
-def test__get(database: Database, model: ModelRow) -> None:
+def test__get(database: Database, model_row: ModelRow) -> None:
     """Test get from database."""
-    database.add(model)
-    assert model.id
+    database.add(model_row)
+    database.commit()
+    assert model_row.id
 
-    match = database.get(ModelRow, model.id)
-    assert match == model
+    match = database.get(ModelRow, model_row.id)
+    assert match == model_row
 
 
 def test__invalid_get(database: Database) -> None:
@@ -75,33 +44,56 @@ def test__invalid_get(database: Database) -> None:
         database.get(ModelRow, 679)
 
 
-def test__exec_first(database: Database, model: ModelRow) -> None:
+def test__delete(database: Database, model_row: ModelRow) -> None:
+    """Test delete from database."""
+    database.add(model_row)
+    database.commit()
+    assert model_row.id
+
+    database.delete(model_row)
+    database.commit()
+    with pytest.raises(LookupError, match=r"with row_id = 1 not found."):
+        database.get(ModelRow, model_row.id)
+
+
+@pytest.fixture
+def orca_model_statement() -> SelectStatement:
+    """Fixture for Statement."""
+    return Select(ModelRow).where(ModelRow.program == "ORCA")
+
+
+def test__exec_first(
+    database: Database,
+    model_row: ModelRow,
+    orca_model_statement: SelectStatement,
+) -> None:
     """Test exec first from database."""
-    database.add(model)
-    stmt = select.matching_rows(model)
-    match = database.exec_first(stmt)
+    database.add(model_row)
+    match = database.exec_first(orca_model_statement)
     assert match
 
 
-def test__exec_one(database: Database, model: ModelRow) -> None:
+def test__exec_one(
+    database: Database, model_row: ModelRow, orca_model_statement: SelectStatement
+) -> None:
     """Test exec one from database."""
-    database.add(model)
-    stmt = select.matching_rows(model)
-    match = database.exec_one(stmt)
+    database.add(model_row)
+    match = database.exec_one(orca_model_statement)
     assert match
 
 
-def test__invalid_exec_one(database: Database, model: ModelRow) -> None:
+def test__invalid_exec_one(
+    database: Database, orca_model_statement: SelectStatement
+) -> None:
     """Test delete and invalid exec one from database."""
-    stmt = select.matching_rows(model)
     with pytest.raises(NoResultFound):
-        database.exec_one(stmt)
+        database.exec_one(orca_model_statement)
 
 
-def test__exec_all(database: Database, model: ModelRow) -> None:
+def test__exec_all(
+    database: Database, model_row: ModelRow, orca_model_statement: SelectStatement
+) -> None:
     """Test exec all from database."""
-    database.add(model)
-    partial = ModelRow.partial()
-    stmt = select.matching_rows(partial)
-    for match in database.exec_all(stmt):
-        assert match == model
+    database.add(model_row)
+    for match in database.exec_all(orca_model_statement):
+        assert match
