@@ -1,1 +1,0 @@
-"""Autostorage examples."""

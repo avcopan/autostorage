@@ -2,7 +2,7 @@
 
 import numpy as np
 import pytest
-from automol import Identity
+from automol import Algorithm, Identity
 from numpy.random import Generator
 
 from autostorage import (
@@ -12,63 +12,11 @@ from autostorage import (
     GeometryRow,
     GradientRow,
     HessianRow,
-    ModelRow,
+    StageRow,
     StationaryPointRow,
+    StepRow,
 )
 from autostorage.exc import MissingPrimaryKeyError, ResultShapeError
-
-
-def test__model_row_hash(model_row: ModelRow) -> None:
-    """Test model row re-hashes upon change."""
-    hash1 = model_row.hash
-    assert hash1
-
-    model_row.basis = "def2-TZVPP"
-    hash2 = model_row.hash
-    assert hash2
-    assert hash2 != hash1
-
-
-def test__geometry_row_hash(geometry_row: GeometryRow) -> None:
-    """Test geometry row re-hashes upon change."""
-    hash1 = geometry_row.hash
-    assert hash1
-
-    geometry_row.charge = 1
-    hash2 = geometry_row.hash
-    assert hash2
-    assert hash2 != hash1
-
-
-def test__resolve_hashed_row(database: Database) -> None:
-    """Test that hashed rows are fetched upon calling .resolve()."""
-    geo1 = (
-        GeometryRow(
-            symbols=["O", "O"],
-            coordinates=np.array([[0, 0, 0], [1, 0, 0]]),
-            charge=0,
-            spin=2,
-        )
-        .canonical_form()
-        .resolve(database)
-        .save(database)
-    )
-
-    database.commit()
-
-    geo2 = (
-        GeometryRow(
-            symbols=["O", "O"],
-            coordinates=np.array([[1, 0, 0], [0, 0, 0]]),
-            charge=0,
-            spin=2,
-        )
-        .canonical_form()
-        .resolve(database)
-        .save(database)
-    )
-
-    assert geo1.id == geo2.id
 
 
 def test__gradient_shape(
@@ -243,7 +191,7 @@ def test__stationary_query(
     stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
     database.add(stationary)
 
-    ident = Identity.from_geometry(geo=geometry_row, algorithm="rdkit inchi")
+    ident = Identity.from_geometry(geo=geometry_row, algorithm=Algorithm.RDKIT_INCHI)
     stationary2 = StationaryPointRow.query(
         database, ident=ident, model=calculation_row.model
     )
@@ -256,6 +204,38 @@ def test__invalid_stationary_query(
     database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
 ) -> None:
     """Test invalid querying of stationary points."""
-    ident = Identity.from_geometry(geo=geometry_row, algorithm="rdkit inchi")
+    ident = Identity.from_geometry(geo=geometry_row, algorithm=Algorithm.RDKIT_INCHI)
     with pytest.raises(MissingPrimaryKeyError):
         StationaryPointRow.query(database, ident=ident, model=calculation_row.model)
+
+
+def test__stage_and_step_query(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test querying of stages and steps built on the chainable Query API."""
+    calculation_row.save(database)
+    geometry_row.save(database)
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    stage1 = StageRow(stationaries=[stationary1])
+    stage2 = StageRow(stationaries=[stationary2])
+    database.add(stage1)
+    database.add(stage2)
+    database.commit()
+
+    stage_match = StageRow.query(database, [stationary1])
+    assert stage_match
+    assert stage_match.id == stage1.id
+
+    step = StepRow(stage1=stage1, stage2=stage2)
+    database.add(step)
+    database.commit()
+
+    step_match = StepRow.query(database, stage1, stage2)
+    assert step_match
+    assert step_match.id == step.id

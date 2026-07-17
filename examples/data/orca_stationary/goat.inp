@@ -1,6 +1,0 @@
-%PAL NPROCS 8 END
-%MAXCORE 4000
-%base "goat"
-! XTB GOAT
-
-*xyzfile 0 2 init.xyz

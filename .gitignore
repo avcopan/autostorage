@@ -228,3 +228,6 @@ __marimo__/
 
 # pixi build
 *.conda
+
+# database schema for publication
+schema/

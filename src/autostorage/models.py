@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, Any, Self, dataclass_transform
 import numpy as np
 from automol import Geometry, Identity, geom
 from automol.utils.types import FloatArray
-from pydantic import ConfigDict, model_validator
-from sqlalchemy.exc import NoResultFound
 from sqlmodel import (
     JSON,
     CheckConstraint,
@@ -17,15 +15,14 @@ from sqlmodel import (
     Field,
     Relationship,
     SQLModel,
-    String,
     UniqueConstraint,
     func,
-    select,
 )
+from sqlmodel.main import SQLModelConfig
 
 from autostorage.exc import MissingPrimaryKeyError
 
-from .types import CalcType, FloatArrayTypeDecorator, Role
+from .types import CalcType, Float32BytesTypeDecorator, FloatArrayTypeDecorator, Role
 
 if TYPE_CHECKING:
     from .database import Database
@@ -73,23 +70,6 @@ class BaseRow(SQLModel):
         return db.merge(self)
 
 
-class BaseHashedRow(BaseRow):
-    """Base for hashed models."""
-
-    hash: str | None = Field(
-        default=None,
-        sa_column=Column(String(64), index=True, nullable=True, unique=True),
-    )
-
-    def resolve(self, db: "Database") -> Self:
-        """Return the existing DB row matching this row's hash, else self."""
-        stmt = select(type(self)).where(type(self).hash == self.hash)
-        try:
-            return db.exec_one(stmt)
-        except NoResultFound:
-            return self
-
-
 class BaseResultRow(BaseRow):
     """Base for result models."""
 
@@ -109,16 +89,16 @@ class BaseResultRow(BaseRow):
             raise MissingPrimaryKeyError([geo, model])
 
         prov = prov or {}
-        stmt = (
-            select(cls)
+        return (
+            db.query(cls)
             .join(CalculationRow)
             .where(
                 cls.geometry_id == geo.id,
                 CalculationRow.model_id == model.id,
                 CalculationRow.input_provenance == prov,
             )
+            .first()
         )
-        return db.exec_first(stmt)
 
 
 @dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
@@ -389,7 +369,7 @@ class GradientRow(BaseResultRow, table=True):
     """
 
     __tablename__ = "gradient"
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
     geometry_id: int | None = Field(
         default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
@@ -421,7 +401,7 @@ class HessianRow(BaseResultRow, table=True):
     """
 
     __tablename__ = "hessian"
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
     geometry_id: int | None = Field(
         default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
@@ -430,7 +410,7 @@ class HessianRow(BaseResultRow, table=True):
         default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
     )
 
-    value: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
+    value: np.ndarray = Field(sa_column=Column(Float32BytesTypeDecorator))
 
     calculation: "CalculationRow" = Relationship()
     geometry: "GeometryRow" = Relationship(back_populates="hessians")
@@ -448,7 +428,7 @@ class HessianRow(BaseResultRow, table=True):
 
 
 # Geometry table
-class GeometryRow(BaseHashedRow, Geometry, table=True):
+class GeometryRow(BaseRow, Geometry, table=True):
     """Molecular geometry definition and metadata.
 
     Attributes
@@ -461,8 +441,6 @@ class GeometryRow(BaseHashedRow, Geometry, table=True):
         Total molecular charge.
     spin
         Number of unpaired electrons (2S).
-    hash
-        Unique hash of the geometry used for deduplication.
     """
 
     __tablename__ = "geometry"
@@ -619,8 +597,8 @@ class StationaryPointRow(BaseRow, table=True):
         calc_type: CalcType | None = None,
     ) -> Self | None:
         """Query for stationary point matching geometry, model, and provenance."""
-        stmt = (
-            select(cls)
+        query = (
+            db.query(cls)
             .join(
                 StationaryIdentityLink,
                 cls.id == StationaryIdentityLink.stationary_id,  # ty:ignore[invalid-argument-type]
@@ -637,7 +615,7 @@ class StationaryPointRow(BaseRow, table=True):
         )
 
         if model or prov or calc_type:
-            stmt = stmt.join(
+            query = query.join(
                 CalculationRow,
                 cls.calculation_id == CalculationRow.id,  # ty:ignore[invalid-argument-type]
             )
@@ -645,15 +623,15 @@ class StationaryPointRow(BaseRow, table=True):
         if model:
             if not model.id:
                 raise MissingPrimaryKeyError([model])
-            stmt = stmt.where(CalculationRow.model_id == model.id)
+            query = query.where(CalculationRow.model_id == model.id)
 
         if prov:
-            stmt = stmt.where(CalculationRow.input_provenance == prov)
+            query = query.where(CalculationRow.input_provenance == prov)
 
         if calc_type:
-            stmt = stmt.where(CalculationRow.calc_type == calc_type)
+            query = query.where(CalculationRow.calc_type == calc_type)
 
-        return db.exec_first(stmt)
+        return query.first()
 
 
 class IdentityRow(BaseRow, Identity, table=True):
@@ -753,8 +731,8 @@ class StageRow(BaseRow, table=True):
         if len(target_ids) != len(stationaries):
             raise MissingPrimaryKeyError(list(stationaries))
 
-        stmt = (
-            select(cls)
+        return (
+            db.query(cls)
             .join(StationaryStageLink)
             .where(cls.is_ts == is_ts)
             .group_by(cls.id)  # ty:ignore[invalid-argument-type]
@@ -768,9 +746,8 @@ class StageRow(BaseRow, table=True):
                 )
                 == len(target_ids),
             )
+            .first()
         )
-
-        return db.exec_first(stmt)
 
 
 class StepRow(BaseRow, table=True):
@@ -844,17 +821,19 @@ class StepRow(BaseRow, table=True):
         id1, id2 = sorted([stage1.id, stage2.id])
         ts_id = stage_ts.id if stage_ts else None
 
-        stmt = select(cls).where(
-            cls.stage_id1 == id1,
-            cls.stage_id2 == id2,
-            cls.stage_id_ts == ts_id,
+        return (
+            db.query(cls)
+            .where(
+                cls.stage_id1 == id1,
+                cls.stage_id2 == id2,
+                cls.stage_id_ts == ts_id,
+            )
+            .first()
         )
-
-        return db.exec_first(stmt)
 
 
 # Calculation rows
-class ModelRow(BaseHashedRow, table=True):
+class ModelRow(BaseRow, table=True):
     """Calculation model specification.
 
     Attributes
@@ -870,22 +849,20 @@ class ModelRow(BaseHashedRow, table=True):
     """
 
     __tablename__ = "model"
-    model_config = ConfigDict(arbitrary_types_allowed=True, validate_assignment=True)
+    __table_args__ = (
+        UniqueConstraint(
+            "program",
+            "program_version",
+            "method",
+            "basis",
+            name="unique_model",
+        ),
+    )
 
     program: str
     program_version: str | None = None
     method: str
     basis: str | None = None
-    hash: str | None = Field(
-        default=None,
-        sa_column=Column(String(64), index=True, nullable=True, unique=True),
-    )
-
-    @model_validator(mode="after")
-    def set_hash(self) -> Self:
-        """Populate hash after model validation."""
-        object.__setattr__(self, "hash", row_hash(self))
-        return self
 
 
 class CalculationRow(BaseRow, table=True):

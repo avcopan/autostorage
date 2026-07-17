@@ -2,8 +2,10 @@
 
 from enum import StrEnum
 from pathlib import Path
+from typing import Any
 
 import numpy as np
+from sqlalchemy import LargeBinary
 from sqlalchemy.types import JSON, String, TypeDecorator
 
 TrajectoryIndices = list[int | list[int]]
@@ -54,6 +56,29 @@ class PathTypeDecorator(TypeDecorator):
         if value is not None:
             return Path(value)
         return value
+
+
+class Float32BytesTypeDecorator(TypeDecorator):
+    """Stores a NumPy array as flat raw float32 binary data in the DB."""
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> bytes | None:  # noqa: ANN401, ARG002
+        if value is not None:
+            # Force conversion to float32 and extract raw byte buffer
+            return np.asarray(value, dtype=np.float32).tobytes()
+        return None
+
+    def process_result_value(
+        self,
+        value: bytes | None,
+        dialect: Any,  # noqa: ANN401, ARG002
+    ) -> np.ndarray | None:
+        if value is not None:
+            # Read back as a flat 1D float32 array
+            return np.frombuffer(value, dtype=np.float32)
+        return None
 
 
 class Role(StrEnum):

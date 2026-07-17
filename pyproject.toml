@@ -10,6 +10,7 @@ dependencies = [
     "automol==0.0.18",
     "pint>=0.25.2",
     "sqlmodel>=0.0.31",
+    "irmsd>=0.1.1",
 ]
 
 [build-system]

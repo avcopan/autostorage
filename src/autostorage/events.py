@@ -3,6 +3,7 @@
 from typing import Any
 
 import numpy as np
+from automol import Algorithm
 from sqlalchemy import event, tuple_
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper
@@ -100,7 +101,7 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
         try:
             inchi = IdentityRow.from_geometry(
                 geo=obj.geometry,
-                algorithm="rdkit inchi",
+                algorithm=Algorithm.RDKIT_INCHI,
             )
             pending_items.append((obj, inchi))
             inchi_lookups.append((inchi.algorithm, inchi.value))
@@ -129,7 +130,9 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
         identity_map[lookup_key] = inchi
 
         try:
-            smiles = IdentityRow.from_geometry(obj.geometry, algorithm="rdkit smiles")
+            smiles = IdentityRow.from_geometry(
+                obj.geometry, algorithm=Algorithm.RDKIT_SMILES
+            )
             smiles_extra = IdentityExtraRow(
                 identity=inchi, attribute="smiles", value=smiles.value
             )
