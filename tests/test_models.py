@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from automol import Algorithm, Identity
 from numpy.random import Generator
+from scipy.spatial.transform import Rotation
 
 from autostorage import (
     CalculationGeometryLink,
@@ -239,3 +240,142 @@ def test__stage_and_step_query(
     step_match = StepRow.query(database, stage1, stage2)
     assert step_match
     assert step_match.id == step.id
+
+
+def _hooh_geometry_row(dihedral_deg: float) -> GeometryRow:
+    """Build an HOOH GeometryRow at a given H-O-O-H dihedral angle."""
+    roo, roh, hoo_ang = 1.45, 0.97, np.radians(100.0)
+    dih = np.radians(dihedral_deg)
+    o1 = np.array([0, 0, 0])
+    o2 = np.array([roo, 0, 0])
+    h1 = o1 + roh * np.array([-np.cos(hoo_ang), np.sin(hoo_ang), 0])
+    base = roh * np.array([np.cos(hoo_ang), np.sin(hoo_ang), 0])
+    rot = np.array(
+        [
+            [1, 0, 0],
+            [0, np.cos(dih), -np.sin(dih)],
+            [0, np.sin(dih), np.cos(dih)],
+        ]
+    )
+    h2 = o2 + rot @ base
+    coordinates = np.array([h1, o1, o2, h2])
+    return GeometryRow(
+        symbols=["H", "O", "O", "H"], coordinates=coordinates, charge=0, spin=0
+    )
+
+
+def _jittered_copy(geometry_row: GeometryRow, rng: Generator) -> GeometryRow:
+    """Build a small-noise, rotated, translated copy of a geometry."""
+    coordinates = np.array(geometry_row.coordinates)
+    coordinates = coordinates + rng.normal(scale=0.01, size=coordinates.shape)
+    rot = Rotation.from_euler("xyz", [30, 20, 10], degrees=True)
+    coordinates = rot.apply(coordinates) + np.array([3.0, 3.0, 3.0])
+    return GeometryRow(
+        symbols=list(geometry_row.symbols),
+        coordinates=coordinates,
+        charge=geometry_row.charge,
+        spin=geometry_row.spin,
+    )
+
+
+def test__conformer_identity_merge_on_duplicate_geometry(
+    database: Database,
+    calculation_row: CalculationRow,
+    geometry_row: GeometryRow,
+    rng: Generator,
+) -> None:
+    """Test that near-identical geometries share one conformer identity."""
+    duplicate_geometry = _jittered_copy(geometry_row, rng)
+
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.add(duplicate_geometry)
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    stationary2 = StationaryPointRow(
+        calculation=calculation_row, geometry=duplicate_geometry
+    )
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    conformer1 = next(i for i in stationary1.identities if i.kind == "conformer")
+    conformer2 = next(i for i in stationary2.identities if i.kind == "conformer")
+    assert conformer1.id == conformer2.id
+
+
+def test__conformer_identity_split_on_distinct_conformer(
+    database: Database, calculation_row: CalculationRow
+) -> None:
+    """Test that geometrically distinct conformers of the same species split."""
+    anti = _hooh_geometry_row(180)
+    gauche = _hooh_geometry_row(60)
+
+    database.add(calculation_row)
+    database.add(anti)
+    database.add(gauche)
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=anti)
+    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=gauche)
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    conformer1 = next(i for i in stationary1.identities if i.kind == "conformer")
+    conformer2 = next(i for i in stationary2.identities if i.kind == "conformer")
+    assert conformer1.value != conformer2.value
+
+
+def test__conformer_group_id_increments_across_distinct_species_in_one_flush(
+    database: Database,
+    calculation_row: CalculationRow,
+    geometry_row: GeometryRow,
+    rng: Generator,
+) -> None:
+    """Test that one flush assigns distinct group ids to distinct species."""
+    duplicate_geometry = _jittered_copy(geometry_row, rng)
+    hooh_geometry = _hooh_geometry_row(180)
+
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.add(duplicate_geometry)
+    database.add(hooh_geometry)
+
+    water1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    water2 = StationaryPointRow(
+        calculation=calculation_row, geometry=duplicate_geometry
+    )
+    hooh = StationaryPointRow(calculation=calculation_row, geometry=hooh_geometry)
+    database.add(water1)
+    database.add(water2)
+    database.add(hooh)
+    database.commit()
+
+    water1_conf = next(i for i in water1.identities if i.kind == "conformer")
+    water2_conf = next(i for i in water2.identities if i.kind == "conformer")
+    hooh_conf = next(i for i in hooh.identities if i.kind == "conformer")
+
+    assert water1_conf.id == water2_conf.id
+    assert hooh_conf.id != water1_conf.id
+
+
+def test__conformer_identity_idempotent_on_second_flush(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that re-flushing an already-committed stationary point is idempotent."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+
+    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary)
+    database.commit()
+
+    conformer_id = next(i for i in stationary.identities if i.kind == "conformer").id
+
+    stationary.order = 1
+    database.add(stationary)
+    database.commit()
+
+    conformer_identities = [i for i in stationary.identities if i.kind == "conformer"]
+    assert len(conformer_identities) == 1
+    assert conformer_identities[0].id == conformer_id

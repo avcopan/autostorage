@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">= 3.12"
 dependencies = [
-    "automol==0.0.18",
+    "automol==0.0.19",
     "pint>=0.25.2",
     "sqlmodel>=0.0.31",
     "irmsd>=0.1.1",

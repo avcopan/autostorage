@@ -3,11 +3,11 @@
 from typing import Any
 
 import numpy as np
-from automol import Algorithm
+from automol import Algorithm, geom
 from sqlalchemy import event, tuple_
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper
-from sqlmodel import Session, select
+from sqlmodel import Integer, Session, cast, func, select
 
 from .exc import ResultShapeError
 from .models import (
@@ -141,6 +141,70 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 
         except ValueError:
             continue
+
+
+def _matching_conformer_identity(
+    obj: StationaryPointRow, inchi: IdentityRow
+) -> IdentityRow | None:
+    """Find the conformer identity of a geometric duplicate among InChI peers."""
+    peers = [c for c in inchi.stationary_points if c is not obj]
+    if not peers:
+        return None
+
+    matches = geom.is_duplicate_conformer(obj.geometry, [c.geometry for c in peers])
+    match_idx = next((i for i, m in enumerate(matches) if m), None)
+    if match_idx is None:
+        return None
+
+    matched_peer = peers[match_idx]
+    return next(
+        (i for i in matched_peer.identities if i.kind == Algorithm.IRMSD.kind), None
+    )
+
+
+@event.listens_for(Session, "before_flush")
+def assign_conformer_ids(session: Session, flush_context: Any, instances: Any) -> None:  # noqa: ANN401, ARG001
+    """Assign a shared conformer-group identity to duplicate stationary points."""
+    pending_items: list[tuple[StationaryPointRow, IdentityRow]] = []
+
+    for obj in session.new:
+        if not isinstance(obj, StationaryPointRow):
+            continue
+        if any(ident.kind == Algorithm.IRMSD.kind for ident in obj.identities):
+            continue
+
+        inchi = next(
+            (i for i in obj.identities if i.algorithm == Algorithm.RDKIT_INCHI), None
+        )
+        if inchi is not None:
+            pending_items.append((obj, inchi))
+
+    if not pending_items:
+        return
+
+    next_group_id: int | None = None
+
+    for obj, inchi in pending_items:
+        match_ident = _matching_conformer_identity(obj, inchi)
+
+        if match_ident is not None:
+            obj.identities.append(match_ident)
+            continue
+
+        if next_group_id is None:
+            current_max = session.exec(
+                select(func.max(cast(IdentityRow.value, Integer))).where(
+                    IdentityRow.kind == Algorithm.IRMSD.kind
+                )
+            ).first()
+            next_group_id = (current_max or 0) + 1
+        else:
+            next_group_id += 1
+
+        conformer = IdentityRow.from_value(
+            str(next_group_id), algorithm=Algorithm.IRMSD
+        )
+        obj.identities.append(conformer)
 
 
 @event.listens_for(StepRow, "before_insert")

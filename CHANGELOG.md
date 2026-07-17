@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 ### Added
+- `assign_conformer_ids` event listener in `events.py` to auto-tag duplicate
+  conformers sharing an InChI with a shared `conformer`-kind `IdentityRow`.
 - `events.py` to house custom `sqlalchemy` events.
 - `exc.py` for custom `Exception` classes.
 - `types.py` for custom Typing.
