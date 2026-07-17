@@ -1,6 +1,6 @@
 """Interface for database storage."""
 
-__version__ = "0.0.9"
+__version__ = "0.0.10"
 
 from . import exc, types, utils
 from .database import Database
