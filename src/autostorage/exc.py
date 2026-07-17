@@ -28,7 +28,7 @@ class MissingPrimaryKeyError(Exception):
         ]
         msg = (
             f"Cannot perform operation using unpersisted database instance(s).\n"
-            f"Try ModelRow.save(db) or ModelRow.resolve(db) before querying.\n"
+            f"Try Database.add(row) or Database.merge(row) before querying.\n"
             f"({','.join(row_ids)})."
         )
         super().__init__(msg)

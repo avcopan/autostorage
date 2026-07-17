@@ -49,7 +49,6 @@ python = ".pixi/envs/dev/bin/python"
 
 [tool.ty.src]
 include = [
-    "examples",
     "src",
     "tests",
 ]

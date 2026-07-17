@@ -1,7 +1,5 @@
 """Autostorage models."""
 
-import hashlib
-import json
 from typing import TYPE_CHECKING, Any, Self, dataclass_transform
 
 import numpy as np
@@ -26,35 +24,6 @@ from .types import CalcType, Float32BytesTypeDecorator, FloatArrayTypeDecorator,
 
 if TYPE_CHECKING:
     from .database import Database
-
-
-def hash_by_dict(data: dict[str, Any]) -> str:
-    """Generate a determinate hash from dictionary entries."""
-    serialized = json.dumps(data, sort_keys=True)
-    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def row_hash(row: SQLModel, *, exclude: set[str] | None = None) -> str:
-    """Generate a determinate BaseRow hash string.
-
-    Parameters
-    ----------
-    row
-        Instance of a BaseRow.
-    exclude
-        Fields to exclude from hash.
-
-    Returns
-    -------
-    model hash
-    """
-    exclude = exclude | {"id", "hash"} if exclude else {"id", "hash"}
-    data = {
-        k: v.strip().lower() if isinstance(v, str) else v
-        for k, v in row.model_dump(exclude=exclude).items()
-    }
-
-    return hash_by_dict(data)
 
 
 @dataclass_transform(kw_only_default=True, field_specifiers=(Field,))

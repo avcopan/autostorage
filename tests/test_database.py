@@ -30,7 +30,7 @@ def test__invalid_add(database: Database, model_row: ModelRow) -> None:
     database.add(model_row)
     database.commit()
 
-    # Violate hash uniqueness
+    # Violate ModelRow's (program, program_version, method, basis) unique constraint
     database.add(model_row2)
     with pytest.raises(IntegrityError):
         database.commit()

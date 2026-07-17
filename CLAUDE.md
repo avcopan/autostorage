@@ -61,7 +61,7 @@ reimplemented here.
   `ModelRow`, `CalculationRow`, `ValidationRow`, `IdentityExtraRow`, and link tables
   (`CalculationGeometryLink`, `CalculationTrajectoryLink`, `TrajectoryGeometryLink`,
   `StationaryIdentityLink`, `StationaryStageLink`, `StepValidationLink`). Base classes:
-  `BaseRow`, `BaseResultRow`, `BaseLink`. Also `hash_by_dict`/`row_hash` for content-hashing rows.
+  `BaseRow`, `BaseResultRow`, `BaseLink`.
 - `events.py` — SQLAlchemy ORM event listeners: shape validation for `GradientRow`/`HessianRow`,
   `validate_geometry_orders`, `add_inchi_identities` (auto-attaches InChI/SMILES `IdentityRow`s
   to new `StationaryPointRow`s via `automol.Algorithm` on flush), and stage-order/barrierless

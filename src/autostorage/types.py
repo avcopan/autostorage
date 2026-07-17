@@ -1,19 +1,15 @@
 """Autostorage types."""
 
 from enum import StrEnum
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 from sqlalchemy import LargeBinary
-from sqlalchemy.types import JSON, String, TypeDecorator
-
-TrajectoryIndices = list[int | list[int]]
+from sqlalchemy.types import JSON, TypeDecorator
 
 __all__ = [
     "CalcType",
     "FloatArrayTypeDecorator",
-    "PathTypeDecorator",
     "Role",
 ]
 
@@ -37,25 +33,6 @@ class FloatArrayTypeDecorator(TypeDecorator):
         if value is None:
             return None
         return np.array(value, dtype=float)
-
-
-class PathTypeDecorator(TypeDecorator):
-    """SQLAlchemy Path -> String type decorator."""
-
-    impl = String  # Store paths as strings in the database
-    cache_ok = True
-
-    def process_bind_param(self, value, dialect):  # noqa: ANN001, ANN201, ARG002
-        """Convert Path object to a string for the database."""
-        if value is not None:
-            return str(value)
-        return value
-
-    def process_result_value(self, value, dialect):  # noqa: ANN001, ANN201, ARG002
-        """Convert string from the database back to a Path object."""
-        if value is not None:
-            return Path(value)
-        return value
 
 
 class Float32BytesTypeDecorator(TypeDecorator):
