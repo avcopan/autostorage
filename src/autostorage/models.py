@@ -15,6 +15,7 @@ from sqlmodel import (
     SQLModel,
     UniqueConstraint,
     func,
+    select,
 )
 from sqlmodel.main import SQLModelConfig
 
@@ -58,16 +59,16 @@ class BaseResultRow(BaseRow):
             raise MissingPrimaryKeyError([geo, model])
 
         prov = prov or {}
-        return (
-            db.query(cls)
+        stmt = (
+            select(cls)
             .join(CalculationRow)
             .where(
                 cls.geometry_id == geo.id,
                 CalculationRow.model_id == model.id,
                 CalculationRow.input_provenance == prov,
             )
-            .first()
         )
+        return db.exec_first(stmt)
 
 
 @dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
@@ -566,8 +567,8 @@ class StationaryPointRow(BaseRow, table=True):
         calc_type: CalcType | None = None,
     ) -> Self | None:
         """Query for stationary point matching geometry, model, and provenance."""
-        query = (
-            db.query(cls)
+        stmt = (
+            select(cls)
             .join(
                 StationaryIdentityLink,
                 cls.id == StationaryIdentityLink.stationary_id,  # ty:ignore[invalid-argument-type]
@@ -584,7 +585,7 @@ class StationaryPointRow(BaseRow, table=True):
         )
 
         if model or prov or calc_type:
-            query = query.join(
+            stmt = stmt.join(
                 CalculationRow,
                 cls.calculation_id == CalculationRow.id,  # ty:ignore[invalid-argument-type]
             )
@@ -592,15 +593,15 @@ class StationaryPointRow(BaseRow, table=True):
         if model:
             if not model.id:
                 raise MissingPrimaryKeyError([model])
-            query = query.where(CalculationRow.model_id == model.id)
+            stmt = stmt.where(CalculationRow.model_id == model.id)
 
         if prov:
-            query = query.where(CalculationRow.input_provenance == prov)
+            stmt = stmt.where(CalculationRow.input_provenance == prov)
 
         if calc_type:
-            query = query.where(CalculationRow.calc_type == calc_type)
+            stmt = stmt.where(CalculationRow.calc_type == calc_type)
 
-        return query.first()
+        return db.exec_first(stmt)
 
 
 class IdentityRow(BaseRow, Identity, table=True):
@@ -700,8 +701,8 @@ class StageRow(BaseRow, table=True):
         if len(target_ids) != len(stationaries):
             raise MissingPrimaryKeyError(list(stationaries))
 
-        return (
-            db.query(cls)
+        stmt = (
+            select(cls)
             .join(StationaryStageLink)
             .where(cls.is_ts == is_ts)
             .group_by(cls.id)  # ty:ignore[invalid-argument-type]
@@ -715,8 +716,8 @@ class StageRow(BaseRow, table=True):
                 )
                 == len(target_ids),
             )
-            .first()
         )
+        return db.exec_first(stmt)
 
 
 class StepRow(BaseRow, table=True):
@@ -790,15 +791,12 @@ class StepRow(BaseRow, table=True):
         id1, id2 = sorted([stage1.id, stage2.id])
         ts_id = stage_ts.id if stage_ts else None
 
-        return (
-            db.query(cls)
-            .where(
-                cls.stage_id1 == id1,
-                cls.stage_id2 == id2,
-                cls.stage_id_ts == ts_id,
-            )
-            .first()
+        stmt = select(cls).where(
+            cls.stage_id1 == id1,
+            cls.stage_id2 == id2,
+            cls.stage_id_ts == ts_id,
         )
+        return db.exec_first(stmt)
 
 
 # Calculation rows

@@ -3,11 +3,10 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
 
-from sqlalchemy import ColumnExpressionArgument, event
+from sqlalchemy import event
 from sqlalchemy.exc import MultipleResultsFound, NoResultFound, OperationalError
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
 # Ensure all modules are loaded with the database
@@ -16,7 +15,7 @@ from .models import *  # noqa: F403
 
 type SelectStatement[T] = Select[T] | SelectOfScalar[T]
 
-__all__ = ["Database", "Query", "Select", "SelectOfScalar", "SelectStatement"]
+__all__ = ["Database", "Select", "SelectOfScalar", "SelectStatement"]
 
 
 class Database:
@@ -158,66 +157,3 @@ class Database:
     def close(self) -> None:
         """Close the database connection."""
         self.engine.dispose()
-
-    def query[RowT: SQLModel](self, model: type[RowT]) -> "Query[RowT]":
-        """Start a chainable query against a model.
-
-        Examples
-        --------
-        >>> # db.query(EnergyRow).where(EnergyRow.value > 0.0).all()
-        """
-        return Query(self, select(model))
-
-
-class Query[RowT: SQLModel]:
-    """Chainable query builder returned by Database.query()."""
-
-    def __init__(self, db: Database, stmt: SelectStatement[RowT]) -> None:
-        self._db = db
-        self._stmt = stmt
-
-    def where(self, *criteria: ColumnExpressionArgument[bool] | bool) -> "Query[RowT]":
-        """Return a new Query with additional WHERE criteria."""
-        return Query(self._db, self._stmt.where(*criteria))
-
-    def join(
-        self, target: type[SQLModel], *criteria: ColumnExpressionArgument[bool]
-    ) -> "Query[RowT]":
-        """Return a new Query with an additional JOIN."""
-        return Query(self._db, self._stmt.join(target, *criteria))
-
-    def order_by(self, *criteria: ColumnExpressionArgument[Any]) -> "Query[RowT]":
-        """Return a new Query with ORDER BY criteria."""
-        return Query(self._db, self._stmt.order_by(*criteria))
-
-    def group_by(self, *criteria: ColumnExpressionArgument[Any]) -> "Query[RowT]":
-        """Return a new Query with GROUP BY criteria."""
-        return Query(self._db, self._stmt.group_by(*criteria))
-
-    def having(self, *criteria: ColumnExpressionArgument[bool]) -> "Query[RowT]":
-        """Return a new Query with HAVING criteria."""
-        return Query(self._db, self._stmt.having(*criteria))
-
-    def distinct(self) -> "Query[RowT]":
-        """Return a new Query with DISTINCT applied."""
-        return Query(self._db, self._stmt.distinct())
-
-    def limit(self, n: int) -> "Query[RowT]":
-        """Return a new Query limited to n rows."""
-        return Query(self._db, self._stmt.limit(n))
-
-    def offset(self, n: int) -> "Query[RowT]":
-        """Return a new Query offset by n rows."""
-        return Query(self._db, self._stmt.offset(n))
-
-    def first(self) -> RowT | None:
-        """Return the first matching row, or None."""
-        return self._db.exec_first(self._stmt)
-
-    def one(self) -> RowT:
-        """Return exactly one matching row."""
-        return self._db.exec_one(self._stmt)
-
-    def all(self) -> Iterator[RowT]:
-        """Yield all matching rows."""
-        return self._db.exec_all(self._stmt)

@@ -3,6 +3,7 @@
 import pytest
 from numpy.random import Generator
 from sqlalchemy.exc import IntegrityError
+from sqlmodel import select
 
 from autostorage import (
     CalculationGeometryLink,
@@ -107,26 +108,22 @@ def test__exec_all(
         assert match
 
 
-def test__query(database: Database, model_row: ModelRow) -> None:
-    """Test chainable query builder."""
+def test__select_statement_chaining(database: Database, model_row: ModelRow) -> None:
+    """Test that native SQLModel statement chaining works through exec_*."""
     database.add(model_row)
     database.commit()
 
-    match = database.query(ModelRow).where(ModelRow.program == "ORCA").first()
-    assert match == model_row
+    stmt = select(ModelRow).where(ModelRow.program == "ORCA")
+    assert database.exec_first(stmt) == model_row
+    assert database.exec_one(stmt) == model_row
+    assert list(database.exec_all(stmt))
 
-    assert database.query(ModelRow).where(ModelRow.program == "ORCA").one() == model_row
-
-    assert list(database.query(ModelRow).where(ModelRow.program == "ORCA").all())
-
-    assert (
-        database.query(ModelRow).where(ModelRow.program == "nonexistent").first()
-        is None
-    )
+    missing_stmt = select(ModelRow).where(ModelRow.program == "nonexistent")
+    assert database.exec_first(missing_stmt) is None
 
 
-def test__query_offset_and_distinct(database: Database) -> None:
-    """Test offset and distinct on the chainable query builder."""
+def test__select_statement_offset_and_distinct(database: Database) -> None:
+    """Test offset and distinct on a plain select() statement."""
     rows = [
         ModelRow(program="ORCA", method="b3lyp", basis=f"basis{i}") for i in range(3)
     ]
@@ -134,15 +131,12 @@ def test__query_offset_and_distinct(database: Database) -> None:
         database.add(row)
     database.commit()
 
-    ordered = list(
-        database.query(ModelRow)
-        .order_by(ModelRow.basis)  # ty:ignore[invalid-argument-type]
-        .offset(1)
-        .all()
-    )
+    ordered_stmt = select(ModelRow).order_by(ModelRow.basis).offset(1)
+    ordered = list(database.exec_all(ordered_stmt))
     assert [r.basis for r in ordered] == ["basis1", "basis2"]
 
-    programs = list(database.query(ModelRow).distinct().all())
+    distinct_stmt = select(ModelRow).distinct()
+    programs = list(database.exec_all(distinct_stmt))
     assert {p.program for p in programs} == {"ORCA"}
 
 
