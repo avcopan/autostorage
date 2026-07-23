@@ -35,6 +35,7 @@ myst_enable_extensions = [
     "deflist",
     "fieldlist",
 ]
+myst_heading_anchors = 3
 
 # 5. Autodoc2 configuration
 autodoc2_packages = [

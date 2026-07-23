@@ -76,7 +76,8 @@ link = CalculationGeometryLink.create(calc, geo, role=Role.INPUT)
 ## Automatic behavior (event listeners)
 
 `autostorage.events` registers SQLAlchemy listeners that run on flush, so these behaviors apply
-regardless of how a session is driven:
+regardless of how a session is driven. See [Events](events.md) for the full detail, including
+why some of these are registered at the session level rather than per-model.
 
 - **Shape validation** — `GradientRow.value` must be `(3 * atom_count,)` and `HessianRow.value`
   must be `(3 * atom_count, 3 * atom_count)` for their linked geometry, or a
@@ -109,4 +110,5 @@ Any change to a `table=True` model's columns/constraints/indexes needs a matchin
 revision. SQLite can't reflect the expression-based null-safe unique indexes on
 `ModelRow`/`StepRow` (e.g. `unique_model_null_safe`, `unq_step_stages_null_safe`), so
 `alembic revision --autogenerate` silently skips those — they must be added to new migrations
-by hand if those models are ever touched again.
+by hand if those models are ever touched again. See [Migrations](migrations.md) for the full
+workflow.

@@ -80,5 +80,7 @@ automatically — no migration step needed. For an existing on-disk database, ap
 AUTOSTORAGE_DATABASE_URL=sqlite:///path/to.db pixi run migrate
 ```
 
-See [Data model](data-model.md) for the schema this creates, and the
-{doc}`API reference <apidocs/index>` for full details on every model and method.
+See [Data model](data-model.md) for the schema this creates, [Database](database.md) for the
+full `Database` method surface, [Events](events.md) for the automatic validation/enrichment
+behavior that runs on every flush, and the {doc}`API reference <apidocs/index>` for full details
+on every model and method.
