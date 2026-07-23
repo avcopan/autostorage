@@ -1,61 +1,52 @@
 """Autostorage types."""
 
+import zlib
 from enum import StrEnum
+from io import BytesIO
 from typing import Any
 
 import numpy as np
 from sqlalchemy import LargeBinary
-from sqlalchemy.types import JSON, TypeDecorator
+from sqlalchemy.types import TypeDecorator
 
 __all__ = [
     "CalcType",
-    "FloatArrayTypeDecorator",
+    "CompressedArrayTypeDecorator",
     "Role",
 ]
 
 
-class FloatArrayTypeDecorator(TypeDecorator):
-    """SQLAlchemy NDArray -> JSON type decorator."""
+class CompressedArrayTypeDecorator(TypeDecorator):
+    """Stores a NumPy array as zlib-compressed binary data in the DB.
 
-    impl = JSON
-    cache_ok = True
-
-    def process_bind_param(self, value, dialect):  # noqa: ANN001, ANN201, ARG002
-        """Convert NumPy array to list for database."""
-        if value is None:
-            return None
-        if isinstance(value, np.ndarray):
-            return value.tolist()
-        return value
-
-    def process_result_value(self, value, dialect):  # noqa: ANN001, ANN201, ARG002
-        """Convert list from database back to NumPy array."""
-        if value is None:
-            return None
-        return np.array(value, dtype=float)
-
-
-class Float32BytesTypeDecorator(TypeDecorator):
-    """Stores a NumPy array as flat raw float32 binary data in the DB."""
+    Shape and dtype are preserved via the NumPy `.npy` format, so this works for
+    arrays of any dimensionality (flat vectors, coordinate matrices, Hessians, ...).
+    """
 
     impl = LargeBinary
     cache_ok = True
 
+    def __init__(self, dtype: Any = np.float64, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+        super().__init__(*args, **kwargs)
+        self.dtype = dtype
+
     def process_bind_param(self, value: Any, dialect: Any) -> bytes | None:  # noqa: ANN401, ARG002
-        if value is not None:
-            # Force conversion to float32 and extract raw byte buffer
-            return np.asarray(value, dtype=np.float32).tobytes()
-        return None
+        """Convert a NumPy array to zlib-compressed `.npy` bytes for the database."""
+        if value is None:
+            return None
+        buffer = BytesIO()
+        np.save(buffer, np.asarray(value, dtype=self.dtype), allow_pickle=False)
+        return zlib.compress(buffer.getvalue())
 
     def process_result_value(
         self,
         value: bytes | None,
         dialect: Any,  # noqa: ANN401, ARG002
     ) -> np.ndarray | None:
-        if value is not None:
-            # Read back as a flat 1D float32 array
-            return np.frombuffer(value, dtype=np.float32)
-        return None
+        """Convert compressed `.npy` bytes from the database back to a NumPy array."""
+        if value is None:
+            return None
+        return np.load(BytesIO(zlib.decompress(value)), allow_pickle=False)
 
 
 class Role(StrEnum):

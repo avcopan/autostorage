@@ -22,7 +22,7 @@ from sqlmodel.main import SQLModelConfig
 
 from autostorage.exc import MissingPrimaryKeyError
 
-from .types import CalcType, Float32BytesTypeDecorator, FloatArrayTypeDecorator, Role
+from .types import CalcType, CompressedArrayTypeDecorator, Role
 
 if TYPE_CHECKING:
     from .database import Database
@@ -368,7 +368,7 @@ class GradientRow(BaseResultRow, table=True):
     calculation_id: int | None = Field(
         default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
     )
-    value: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
+    value: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
 
     calculation: "CalculationRow" = Relationship()
     geometry: "GeometryRow" = Relationship(back_populates="gradients")
@@ -401,7 +401,9 @@ class HessianRow(BaseResultRow, table=True):
         default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
     )
 
-    value: np.ndarray = Field(sa_column=Column(Float32BytesTypeDecorator))
+    value: np.ndarray = Field(
+        sa_column=Column(CompressedArrayTypeDecorator(dtype=np.float32))
+    )
 
     calculation: "CalculationRow" = Relationship()
     geometry: "GeometryRow" = Relationship(back_populates="hessians")
@@ -437,7 +439,7 @@ class GeometryRow(BaseRow, Geometry, table=True):
     __tablename__ = "geometry"
 
     symbols: list[str] = Field(sa_column=Column(JSON))
-    coordinates: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
+    coordinates: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
     charge: int
     spin: int
 
