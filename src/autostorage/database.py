@@ -3,6 +3,8 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
 from sqlalchemy import event
 from sqlalchemy.exc import MultipleResultsFound, NoResultFound, OperationalError
@@ -65,7 +67,7 @@ class Database:
                 try:
                     cursor.execute("PRAGMA journal_mode=WAL")
                 except OperationalError:
-                    cursor.execute("PRAGMA foreign_mode=DELETE")
+                    cursor.execute("PRAGMA journal_mode=DELETE")
             # SQLite ignores FK constraints unless enabled
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
@@ -95,7 +97,15 @@ class Database:
             raise
 
     def add[RowT: SQLModel](self, row: RowT) -> None:
-        """Add row to session."""
+        """Add row to session.
+
+        Note
+        ----
+        This only stages the row; it is not validated or written to the
+        database until the next `flush()` or `commit()`. Integrity/shape
+        errors (unique constraints, the shape event listeners) raise there,
+        which may be far removed from this call.
+        """
         with self.session() as session:
             session.add(row)
 
@@ -107,9 +117,19 @@ class Database:
             return merged
 
     def flush(self) -> None:
-        """Flush pending changes to the database without committing."""
+        """Flush pending changes to the database without committing.
+
+        Note
+        ----
+        Unlike `commit()`, this doesn't trigger SQLAlchemy's default
+        `expire_on_commit` behavior, so an already-loaded object whose row
+        was removed by a DB-level `ondelete="CASCADE"` during this flush
+        would otherwise be read back stale. `expire_all()` forces those
+        objects to reload (or raise) on next access instead.
+        """
         with self.session() as session:
             session.flush()
+            session.expire_all()
 
     def commit(self) -> None:
         """Commit database session."""
@@ -149,11 +169,27 @@ class Database:
                 msg = f"Multiple rows found matching {stmt}."
                 raise LookupError(msg) from exc
 
-    def exec_all[RowT](self, stmt: SelectStatement[RowT]) -> Iterator[RowT]:
-        """Yield all matches to a statement."""
+    def exec_all[RowT](self, stmt: SelectStatement[RowT]) -> list[RowT]:
+        """Return all matches to a statement."""
         with self.session() as session:
-            yield from session.exec(stmt)
+            return list(session.exec(stmt).all())
 
     def close(self) -> None:
         """Close the database connection."""
         self.engine.dispose()
+
+    def __enter__(self) -> Self:
+        """Enter a `with Database(...) as db:` block."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: object,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Roll back on exception, then close the database connection."""
+        del exc_value, traceback
+        if exc_type is not None:
+            self._session.rollback()
+        self.close()

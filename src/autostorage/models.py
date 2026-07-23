@@ -47,7 +47,7 @@ class BaseResultRow(BaseRow):
         *,
         geo: "GeometryRow",
         model: "ModelRow",
-        prov: dict[Any, Any] | None = None,
+        prov: dict[str, Any] | None = None,
     ) -> Self | None:
         """Query for result matching geometry, model, and provenance."""
         if not geo.id or not model.id:
@@ -139,7 +139,9 @@ class CalculationGeometryLink(BaseLink, table=True):
         nullable=False,
         primary_key=True,
     )
-    role: Role = Field(sa_column=Column(Enum(Role)))
+    role: Role = Field(
+        sa_column=Column(Enum(Role, values_callable=lambda x: [e.value for e in x]))
+    )
 
     geometry: "GeometryRow" = Relationship(back_populates="calculation_links")
     calculation: "CalculationRow" = Relationship(back_populates="geometry_links")
@@ -178,7 +180,9 @@ class CalculationTrajectoryLink(BaseLink, table=True):
         nullable=False,
         primary_key=True,
     )
-    role: Role = Field(sa_column=Column(Enum(Role)))
+    role: Role = Field(
+        sa_column=Column(Enum(Role, values_callable=lambda x: [e.value for e in x]))
+    )
 
     trajectory: "TrajectoryRow" = Relationship(back_populates="calculation_links")
     calculation: "CalculationRow" = Relationship(back_populates="trajectory_links")
@@ -331,10 +335,18 @@ class EnergyRow(BaseResultRow, table=True):
     __tablename__ = "energy"
 
     geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="geometry.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     value: float
 
@@ -363,10 +375,18 @@ class GradientRow(BaseResultRow, table=True):
     model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
     geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="geometry.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     value: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
 
@@ -395,10 +415,18 @@ class HessianRow(BaseResultRow, table=True):
     model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
     geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="geometry.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
 
     value: np.ndarray = Field(
@@ -504,10 +532,18 @@ class StationaryPointRow(BaseRow, table=True):
     __tablename__ = "stationary_point"
 
     geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="geometry.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     order: int = 0
     is_pseudo: bool = False
@@ -588,6 +624,9 @@ class IdentityRow(BaseRow, Identity, table=True):
     """
 
     __tablename__ = "identity"
+    __table_args__ = (
+        UniqueConstraint("kind", "algorithm", "value", name="unique_identity"),
+    )
 
     stationary_points: list["StationaryPointRow"] = Relationship(
         back_populates="identities", link_model=StationaryIdentityLink
@@ -858,11 +897,17 @@ class CalculationRow(BaseRow, table=True):
     __tablename__ = "calculation"
 
     model_id: int | None = Field(
-        default=None, foreign_key="model.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="model.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calc_type: CalcType = Field(
         sa_column=Column(Enum(CalcType, values_callable=lambda x: [e.value for e in x]))
     )
+    # Intentionally unbounded free-form JSON; add a size/schema guardrail if
+    # these are ever populated from a less-trusted input path.
     input_provenance: dict[str, Any] | None = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
@@ -895,13 +940,14 @@ class ValidationRow(BaseRow, table=True):
     """
 
     __tablename__ = "validation"
-    id: int | None = Field(default=None, primary_key=True)
 
     calculation_id: int | None = Field(
         default=None, foreign_key="calculation.id", ondelete="CASCADE"
     )
 
     method: str
+    # Intentionally unbounded free-form JSON; add a size/schema guardrail if
+    # this is ever populated from a less-trusted input path.
     extras: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     calculation: "CalculationRow" = Relationship()

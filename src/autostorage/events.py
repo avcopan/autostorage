@@ -6,11 +6,12 @@ import numpy as np
 from automol import Algorithm, geom
 from sqlalchemy import event, tuple_
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Mapper
+from sqlalchemy.orm import Mapper, object_session
 from sqlmodel import Integer, Session, cast, func, select
 
 from .exc import ResultShapeError
 from .models import (
+    GeometryRow,
     GradientRow,
     HessianRow,
     IdentityExtraRow,
@@ -18,6 +19,23 @@ from .models import (
     StationaryPointRow,
     StepRow,
 )
+
+
+def _resolve_geometry(
+    target: GradientRow | HessianRow | StationaryPointRow,
+) -> GeometryRow | None:
+    """Return the target's geometry, resolving it via the session if unattached.
+
+    Setting only `geometry_id` (without `.geometry`) leaves the relationship
+    unpopulated until the ORM syncs it, which would otherwise let shape/order
+    validation be skipped for a row that does have a geometry.
+    """
+    geometry = target.geometry
+    if geometry is None and target.geometry_id is not None:
+        session = object_session(target)
+        if session is not None:
+            geometry = session.get(GeometryRow, target.geometry_id)
+    return geometry
 
 
 @event.listens_for(GradientRow, "before_insert")
@@ -28,10 +46,11 @@ def verify_gradient_shape(
     target: GradientRow,
 ) -> None:
     """Verify shape of the Gradient array before saving to the database."""
-    if not target.geometry:
+    geometry = _resolve_geometry(target)
+    if geometry is None:
         return
 
-    expected = (3 * target.geometry.atom_count,)
+    expected = (3 * geometry.atom_count,)
     actual = np.shape(target.value)
 
     if actual != expected:
@@ -46,10 +65,11 @@ def verify_hessian_shape(
     target: HessianRow,
 ) -> None:
     """Verify shape of the Hessian matrix before saving to DB."""
-    if not target.geometry:
+    geometry = _resolve_geometry(target)
+    if geometry is None:
         return
 
-    expected_dim = 3 * target.geometry.atom_count
+    expected_dim = 3 * geometry.atom_count
     expected = (expected_dim, expected_dim)
     actual = np.shape(target.value)
 
@@ -67,9 +87,8 @@ def validate_geometry_orders(
     target: StationaryPointRow | HessianRow,
 ) -> None:
     """Ensure StationaryPoint and Hessian orders align."""
-    # Ensure there is a geometry reference
-    geometry = getattr(target, "geometry", None)
-    if not geometry:
+    geometry = _resolve_geometry(target)
+    if geometry is None:
         return
 
     # Validate that all Hessians on this geometry agree on order
@@ -192,6 +211,11 @@ def assign_conformer_ids(session: Session, flush_context: Any, instances: Any) -
             continue
 
         if next_group_id is None:
+            # Assumes single-writer semantics, consistent with Database's
+            # documented non-thread-safety. If that's violated, IdentityRow's
+            # unique_identity constraint (kind, algorithm, value) turns a
+            # racing duplicate group id into an IntegrityError at commit
+            # rather than a silently merged conformer group.
             current_max = session.exec(
                 select(func.max(cast(IdentityRow.value, Integer))).where(
                     IdentityRow.kind == Algorithm.IRMSD.kind
