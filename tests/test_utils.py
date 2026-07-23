@@ -236,6 +236,34 @@ def test__export_barrierless_placeholder(
     assert "Frequencies[1/cm]  0" in barrier_section
 
 
+def test__export_symmetry_factor_computed_and_barrierless_placeholder(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that SymmetryFactor is a real computed value, except for barrierless TSs."""
+    database.add(calculation_row)
+    database.commit()
+
+    ref = _stationary(database, calculation_row, geometry_row)
+    other_geo = _diatomic(["H", "H"], 0.74)
+    other = _stationary(database, calculation_row, other_geo)
+    _with_energy(database, calculation_row, geometry_row, -76.0)
+    _with_energy(database, calculation_row, other_geo, -1.0)
+
+    other_stage = StageRow(stationaries=[other])
+    step = StepRow(stage1=StageRow(stationaries=[ref]), stage2=other_stage)
+    database.add(step)
+    database.commit()
+
+    text = export_mess_input(database, [step], ref=ref, model=calculation_row.model)
+
+    other_section = _species_section(text, "W2")
+    assert f"SymmetryFactor  {other_geo.symmetry_number}" in other_section
+    assert "TODO(autostorage)" not in other_section
+
+    barrier_section = _barrier_section(text, "B1")
+    assert "SymmetryFactor  1  ! TODO(autostorage)" in barrier_section
+
+
 def test__export_custom_labels_and_names_override(
     database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
 ) -> None:

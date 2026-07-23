@@ -34,12 +34,14 @@ _ELECTRONIC_LEVELS_BY_HILL_FORMULA: dict[str, tuple[tuple[float, int], ...]] = {
     "HO": ((0.0, 2), (140.0, 2)),
 }
 
-# Symmetry numbers aren't computed anywhere in autostorage or automol; this
-# placeholder is always syntactically valid MESS input but must be checked by
-# hand before the generated file is used for a real calculation.
+# Symmetry numbers are computed from `GeometryRow.symmetry_number` wherever a
+# geometry is available. The one exception is a barrierless step's TS block,
+# which has no geometry at all (see `_render_barrierless_placeholder_block`)
+# and so falls back to this placeholder, which must be checked by hand before
+# the generated file is used for a real calculation.
 _SYMMETRY_NUMBER_PLACEHOLDER = (
     "1  ! TODO(autostorage): placeholder -- "
-    "symmetry number not computed, verify manually"
+    "no TS geometry to compute a symmetry number from, verify manually"
 )
 
 
@@ -224,9 +226,17 @@ def _render_fragment_zero_energy_block() -> str:
     return "ZeroEnergy[1/cm]  0"
 
 
-def _render_core_rigidrotor_block() -> str:
-    """Render a MESS `Core RigidRotor` block with a placeholder symmetry number."""
-    return f"Core RigidRotor\n  SymmetryFactor  {_SYMMETRY_NUMBER_PLACEHOLDER}\nEnd"
+def _render_core_rigidrotor_block(symmetry_number: int | None) -> str:
+    """Render a MESS `Core RigidRotor` block.
+
+    Falls back to a flagged placeholder when `symmetry_number` is `None`
+    (only for a barrierless step's TS block, which has no geometry to
+    compute one from).
+    """
+    factor = (
+        _SYMMETRY_NUMBER_PLACEHOLDER if symmetry_number is None else symmetry_number
+    )
+    return f"Core RigidRotor\n  SymmetryFactor  {factor}\nEnd"
 
 
 def _render_fragment_block(fragment: _FragmentData, label: str) -> str:
@@ -235,7 +245,7 @@ def _render_fragment_block(fragment: _FragmentData, label: str) -> str:
         f"Fragment  {label}",
         _indent("RRHO", 2),
         _indent(_render_geometry_block(fragment.geometry), 4),
-        _indent(_render_core_rigidrotor_block(), 4),
+        _indent(_render_core_rigidrotor_block(fragment.geometry.symmetry_number), 4),
     ]
     if fragment.frequencies:
         parts.append(_indent(_render_frequencies_block(fragment.frequencies), 4))
@@ -253,7 +263,7 @@ def _render_species_block(
         "Species",
         _indent("RRHO", 2),
         _indent(_render_geometry_block(fragment.geometry), 4),
-        _indent(_render_core_rigidrotor_block(), 4),
+        _indent(_render_core_rigidrotor_block(fragment.geometry.symmetry_number), 4),
     ]
     if fragment.frequencies:
         parts.append(_indent(_render_frequencies_block(fragment.frequencies), 4))
@@ -363,7 +373,7 @@ def _render_barrier_block(  # noqa: PLR0913
     parts = [
         _indent("RRHO", 2),
         _indent(_render_geometry_block(ts_geometry), 4),
-        _indent(_render_core_rigidrotor_block(), 4),
+        _indent(_render_core_rigidrotor_block(ts_geometry.symmetry_number), 4),
     ]
     if real_frequencies:
         parts.append(_indent(_render_frequencies_block(real_frequencies), 4))
@@ -410,7 +420,7 @@ def _render_barrierless_placeholder_block(
             "geometries manually",
             6,
         ),
-        _indent(_render_core_rigidrotor_block(), 4),
+        _indent(_render_core_rigidrotor_block(None), 4),
         _indent("Frequencies[1/cm]  0", 4),
         _indent(
             "! TODO(autostorage): no TS frequencies -- supply manually or "
@@ -448,11 +458,13 @@ def export_mess_input(  # noqa: PLR0913
     All energies (`ZeroEnergy`/`GroundEnergy[kcal/mol]`) are the bare
     electronic energy (`EnergyRow.value`) at `model`, relative to `ref` --
     not ZPE-corrected, since MESS applies its own ZPE handling from the
-    `Frequencies` block. Symmetry numbers have no data source anywhere in
-    this schema and are always rendered as a flagged placeholder. This
-    function does not emit `Model`/`EnergyRelaxation`/`CollisionFrequency`
-    blocks -- those are simulation setup, not stored reaction data, and must
-    be prepended by the caller.
+    `Frequencies` block. Symmetry numbers (`SymmetryFactor`) are computed
+    from each species'/barrier's geometry via `GeometryRow.symmetry_number`,
+    except for a barrierless step's TS block, which has no geometry and so
+    gets a flagged placeholder instead. This function does not emit
+    `Model`/`EnergyRelaxation`/`CollisionFrequency` blocks -- those are
+    simulation setup, not stored reaction data, and must be prepended by the
+    caller.
 
     Parameters
     ----------

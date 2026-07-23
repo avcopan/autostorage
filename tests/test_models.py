@@ -382,6 +382,25 @@ def test__hessian_frequency_cache_invalidated_on_value_update(
     assert hessian.harmonic_frequencies != original_frequencies
 
 
+def test__geometry_symmetry_number() -> None:
+    """Test that symmetry_number is computed from a geometry's point group.
+
+    Uses a properly symmetric (C2v) water geometry -- unlike `geometry_row`,
+    whose bond lengths/angle are arbitrary and so has no symmetry to detect --
+    to guard against a broken computation silently returning 1 for everything.
+    """
+    oh = 0.9584
+    angle = np.radians(104.45)
+    o = np.array([0.0, 0.0, 0.0])
+    h1 = np.array([0.0, oh * np.sin(angle / 2), oh * np.cos(angle / 2)])
+    h2 = np.array([0.0, -oh * np.sin(angle / 2), oh * np.cos(angle / 2)])
+    water = GeometryRow(
+        symbols=["O", "H", "H"], coordinates=np.array([o, h1, h2]), charge=0, spin=0
+    )
+    expected_symmetry_number = 2
+    assert water.symmetry_number == expected_symmetry_number
+
+
 def test__result_query(
     database: Database,
     calculation_row: CalculationRow,

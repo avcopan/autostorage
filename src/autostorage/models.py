@@ -23,6 +23,9 @@ from sqlmodel import (
     select,
 )
 from sqlmodel.main import SQLModelConfig
+from stereomolgraph.algorithms.symmetry import (
+    symmetry_number as _stereo_symmetry_number,
+)
 
 from autostorage.exc import MissingPrimaryKeyError
 
@@ -184,6 +187,19 @@ class GeometryRow(BaseRow, Geometry, table=True):
     calculation_links: list["CalculationGeometryLink"] = Relationship(
         back_populates="geometry"
     )
+
+    @cached_property
+    def symmetry_number(self) -> int:
+        """Symmetry number from stereo-preserving graph automorphisms.
+
+        Cached per instance, since counting graph isomorphisms is expensive.
+        Unlike `HessianRow.harmonic_frequencies`, no invalidation listener is
+        needed: `symbols`/`coordinates` are immutable after insert (enforced
+        by `verify_geometry_immutable_fields` in events.py), so the cached
+        value can never go stale.
+        """
+        graph = geom.stereo_mol_graph(self)
+        return _stereo_symmetry_number(graph)
 
 
 # Result tables

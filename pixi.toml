@@ -43,7 +43,7 @@ alembic = ">=1.18.5,<2"
 [feature.dev.pypi-dependencies]
 keepachangelog = "*"
 xyzrender = ">=0.3.1, <0.4"
-stereomolgraph = "*"
+stereomolgraph = ">=0.0.22b0"
 irmsd = ">=0.1.1"
 
 [feature.docs.dependencies]
