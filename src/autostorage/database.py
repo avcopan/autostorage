@@ -1,16 +1,24 @@
-"""Database connection."""
+"""SQLite database connection and session management."""
 
-from collections.abc import Iterator
+import json
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
+from types import TracebackType
+from typing import Self
 
+import click
 from sqlalchemy import event
-from sqlalchemy.exc import MultipleResultsFound, NoResultFound, OperationalError
+from sqlalchemy import select as sa_select
+from sqlalchemy.exc import MultipleResultsFound, NoResultFound
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
 # Ensure all modules are loaded with the database
 from .events import *  # noqa: F403
+from .merge import MergeReport
+from .merge import merge_databases as _merge_databases
 from .models import *  # noqa: F403
 
 type SelectStatement[T] = Select[T] | SelectOfScalar[T]
@@ -32,9 +40,7 @@ class Database:
         Persistent database session.
     """
 
-    def __init__(
-        self, path: str | Path, *, echo: bool = False, wal: bool = False
-    ) -> None:
+    def __init__(self, path: str | Path, *, echo: bool = False) -> None:
         """
         Initialize database connection manager.
 
@@ -45,27 +51,23 @@ class Database:
         echo, optional
             If True, SQL statements will be logged to the standard output.
             If False, no logging is performed.
-        wal, optional
-            If True, attempt to enable WAL journal mode for better concurrent
-            read/write performance.
         """
         self.path = Path(path)
         self.engine = create_engine(
             f"sqlite:///{self.path}",
             echo=echo,
+            # Canonicalize dict key order so JSON-column equality filters (e.g.
+            # `CalculationRow.input_provenance == prov`) match regardless of the
+            # key insertion order used to build the Python dict being compared.
+            json_serializer=partial(json.dumps, sort_keys=True),
             # Allow multithreading
             connect_args={"check_same_thread": False},
         )
 
         @event.listens_for(self.engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
-            """Set WAL pragma."""
+            """Set SQLite pragmas."""
             cursor = dbapi_connection.cursor()
-            if wal:
-                try:
-                    cursor.execute("PRAGMA journal_mode=WAL")
-                except OperationalError:
-                    cursor.execute("PRAGMA foreign_mode=DELETE")
             # SQLite ignores FK constraints unless enabled
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
@@ -95,9 +97,26 @@ class Database:
             raise
 
     def add[RowT: SQLModel](self, row: RowT) -> None:
-        """Add row to session."""
+        """Add row to session.
+
+        Note
+        ----
+        The row is not validated or written to the database until the next `flush()` or
+        `commit()`. Integrity/shape errors (unique constraints, the shape event
+        listeners) raise there, which may be far removed from this call.
+        """
         with self.session() as session:
             session.add(row)
+
+    def add_all[RowT: SQLModel](self, rows: Iterable[RowT]) -> None:
+        """Add multiple rows to session.
+
+        Note
+        ----
+        Bulk `add()`. Same staging-only caveat applies.
+        """
+        with self.session() as session:
+            session.add_all(rows)
 
     def merge[RowT: SQLModel](self, row: RowT) -> RowT:
         """Merge row into current session and commit, returning the merged row."""
@@ -106,10 +125,32 @@ class Database:
             session.commit()
             return merged
 
+    def merge_from(self, source_db: "Database", *, commit: bool = True) -> MergeReport:
+        """Merge another database's contents into this one.
+
+        Unlike `merge()` (a same-session upsert of a single row), this
+        copies every row from a separate `source_db` into this database,
+        remapping ids/foreign keys and deduplicating content-unique rows.
+
+        See Also
+        --------
+        autostorage.merge
+        """
+        return _merge_databases(target=self, source=source_db, commit=commit)
+
     def flush(self) -> None:
-        """Flush pending changes to the database without committing."""
+        """Flush pending changes to the database without committing.
+
+        Note
+        ----
+        Unlike `commit()`, this doesn't trigger SQLAlchemy's default `expire_on_commit`
+        behavior, so an already-loaded object whose row was removed by a DB-level
+        `ondelete="CASCADE"` during this flush would be read back stale. `expire_all()`
+        forces those objects to reload (or raise) on next access instead.
+        """
         with self.session() as session:
             session.flush()
+            session.expire_all()
 
     def commit(self) -> None:
         """Commit database session."""
@@ -122,12 +163,18 @@ class Database:
             session.delete(row)
             session.commit()
 
+    def get_or_none[RowT: SQLModel](
+        self, model: type[RowT], row_id: int
+    ) -> RowT | None:
+        """Get row from database, returning `None` instead of raising on a miss."""
+        with self.session() as session:
+            return session.get(model, row_id)
+
     def get[RowT: SQLModel](self, model: type[RowT], row_id: int) -> RowT:
         """Get row from database."""
-        with self.session() as session:
-            row = session.get(model, row_id)
-            if row is not None:
-                return row
+        row = self.get_or_none(model, row_id)
+        if row is not None:
+            return row
 
         msg = f"{model} with {row_id = } not found."
         raise LookupError(msg)
@@ -137,7 +184,7 @@ class Database:
         with self.session() as session:
             return session.exec(stmt).first()
 
-    def exec_one[RowT](self, stmt: SelectStatement[RowT]) -> RowT:
+    def exec_one[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> RowT:
         """Return the single match to a statement."""
         with self.session() as session:
             try:
@@ -149,11 +196,58 @@ class Database:
                 msg = f"Multiple rows found matching {stmt}."
                 raise LookupError(msg) from exc
 
-    def exec_all[RowT](self, stmt: SelectStatement[RowT]) -> Iterator[RowT]:
-        """Yield all matches to a statement."""
+    def exec_all[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> list[RowT]:
+        """Return all matches to a statement."""
         with self.session() as session:
-            yield from session.exec(stmt)
+            return list(session.exec(stmt).all())
+
+    def exists[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> bool:
+        """Return whether any row matches a statement.
+
+        Executes as a single `EXISTS` subquery instead of `exec_first`, so a matching
+        row is never materialized.
+        """
+        with self.session() as session:
+            return bool(
+                session.exec(sa_select(stmt.exists())).scalar()  # ty:ignore[no-matching-overload]
+            )
 
     def close(self) -> None:
         """Close the database connection."""
         self.engine.dispose()
+
+    def __enter__(self) -> Self:
+        """Enter a `with Database(...) as db:` block."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: object,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Roll back on exception, then close the database connection."""
+        del exc_value, traceback
+        if exc_type is not None:
+            self._session.rollback()
+        self.close()
+
+
+@click.command(name="autostorage-merge")
+@click.argument("target", type=click.Path(path_type=Path))
+@click.argument("source", type=click.Path(path_type=Path))
+def merge_databases(target: Path, source: Path) -> None:
+    """Merge one on-disk database's contents into another, as a CLI command.
+
+    Installed as the ``autostorage-merge`` console script (see ``[project.scripts]`` in
+    ``pyproject.toml``); also runnable via ``python -m autostorage.database``.
+    """
+    with Database(target) as target_db, Database(source) as source_db:
+        report = _merge_databases(target=target_db, source=source_db)
+
+    click.echo(f"Copied: {report.copied}")
+    click.echo(f"Reused: {report.reused}")
+
+
+if __name__ == "__main__":
+    merge_databases()

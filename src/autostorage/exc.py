@@ -4,7 +4,11 @@ from typing import Self
 
 from sqlmodel import SQLModel
 
-__all__ = ["MissingPrimaryKeyError", "ResultShapeError"]
+__all__ = ["DataIntegrityError", "MissingPrimaryKeyError", "ResultShapeError"]
+
+
+class DataIntegrityError(Exception):
+    """Raise when an ORM event detects a data integrity violation."""
 
 
 class ResultShapeError(Exception):

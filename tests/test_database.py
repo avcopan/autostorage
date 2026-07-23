@@ -2,6 +2,7 @@
 
 import pytest
 from numpy.random import Generator
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -51,6 +52,28 @@ def test__invalid_get(database: Database) -> None:
     """Test invalid get from database."""
     with pytest.raises(LookupError):
         database.get(ModelRow, 679)
+
+
+def test__get_or_none_returns_row_or_none(
+    database: Database, model_row: ModelRow
+) -> None:
+    """Test get_or_none returns the row on a hit and None on a miss."""
+    database.add(model_row)
+    database.commit()
+    assert model_row.id
+
+    assert database.get_or_none(ModelRow, model_row.id) == model_row
+    assert database.get_or_none(ModelRow, 679) is None
+
+
+def test__add_all(database: Database) -> None:
+    """Test add_all stages multiple rows for the next flush/commit."""
+    rows = [ModelRow(program="orca", method="xtb", basis=f"basis{i}") for i in range(3)]
+    database.add_all(rows)
+    database.commit()
+
+    assert all(row.id is not None for row in rows)
+    assert len({row.id for row in rows}) == len(rows)
 
 
 def test__delete(database: Database, model_row: ModelRow) -> None:
@@ -108,6 +131,18 @@ def test__exec_all(
         assert match
 
 
+def test__exists_true_and_false(
+    database: Database, model_row: ModelRow, orca_model_statement: SelectStatement
+) -> None:
+    """Test exists() returns True for a match and False otherwise."""
+    database.add(model_row)
+    database.commit()
+
+    assert database.exists(orca_model_statement) is True
+    missing_stmt = select(ModelRow).where(ModelRow.program == "nonexistent")
+    assert database.exists(missing_stmt) is False
+
+
 def test__select_statement_chaining(database: Database, model_row: ModelRow) -> None:
     """Test that native SQLModel statement chaining works through exec_*."""
     database.add(model_row)
@@ -141,11 +176,11 @@ def test__select_statement_offset_and_distinct(database: Database) -> None:
 
 
 def test__merge_commits(database: Database, model_row: ModelRow) -> None:
-    """Test that merge() (and therefore BaseRow.save()) commits immediately."""
-    merged = model_row.save(database)
+    """Test that merge() commits immediately."""
+    merged = database.merge(model_row)
     assert merged.id
 
-    # A rollback after save() must not undo it, since merge() already committed.
+    # A rollback after merge() must not undo it, since merge() already committed.
     database._session.rollback()  # noqa: SLF001
     assert database.get(ModelRow, merged.id) == merged
 
@@ -177,3 +212,25 @@ def test__session_rolls_back_on_generic_error(
     database.add(unrelated)
     database.commit()
     assert unrelated.id
+
+
+def test__link_table_reverse_lookup_indexes_exist(database: Database) -> None:
+    """Test that the trailing column of each composite-PK link table is indexed.
+
+    The composite primary key on each of these tables only serves lookups keyed
+    by its leading column; each also needs its own index for the other direction.
+    """
+    expected = {
+        "calculation_geometry_link": "calculation_id",
+        "calculation_trajectory_link": "calculation_id",
+        "trajectory_geometry_link": "trajectory_id",
+        "stationary_identity_link": "identity_id",
+        "stationary_stage_link": "stage_id",
+        "step_validation_link": "validation_id",
+    }
+    inspector = inspect(database.engine)
+    for table, column in expected.items():
+        indexed_columns = {
+            name for idx in inspector.get_indexes(table) for name in idx["column_names"]
+        }
+        assert column in indexed_columns

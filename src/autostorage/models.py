@@ -1,16 +1,21 @@
-"""Autostorage models."""
+"""SQLModel row definitions for autostorage's persistence schema."""
 
+from datetime import datetime
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Self, dataclass_transform
 
 import numpy as np
-from automol import Geometry, Identity, geom
+from automol import Algorithm, Geometry, Identity, geom
 from automol.utils.types import FloatArray
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text
 from sqlmodel import (
     JSON,
     CheckConstraint,
     Column,
     Enum,
     Field,
+    Index,
     Relationship,
     SQLModel,
     UniqueConstraint,
@@ -18,26 +23,56 @@ from sqlmodel import (
     select,
 )
 from sqlmodel.main import SQLModelConfig
+from stereomolgraph.algorithms.symmetry import (
+    symmetry_number as _stereo_symmetry_number,
+)
 
 from autostorage.exc import MissingPrimaryKeyError
 
-from .types import CalcType, Float32BytesTypeDecorator, FloatArrayTypeDecorator, Role
+from .types import CalcStatus, CalcType, CompressedArrayTypeDecorator, Role
 
 if TYPE_CHECKING:
     from .database import Database
 
 
+def _fk_field(target: str, *, nullable: bool = False, index: bool = True) -> Any:  # noqa: ANN401
+    """Build a standard foreign-key Field with ON DELETE CASCADE."""
+    return Field(
+        default=None,
+        foreign_key=target,
+        ondelete="CASCADE",
+        nullable=nullable,
+        index=index,
+    )
+
+
 @dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
-class BaseRow(SQLModel):
+class TimestampMixin(SQLModel):
+    """Mixin adding server-managed creation/update timestamps.
+
+    Annotated as `datetime | None` since the value is unset in Python until the
+    database fills it in via `server_default`/`onupdate`; `nullable=False`
+    overrides the `NULL`-by-default column that an Optional annotation would
+    otherwise produce, since the DB always has a value once the row is flushed.
+    """
+
+    created_at: datetime | None = Field(
+        default=None,
+        nullable=False,
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        nullable=False,
+        sa_column_kwargs={"server_default": func.now(), "onupdate": func.now()},
+    )
+
+
+@dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
+class BaseRow(TimestampMixin, SQLModel):
     """Base for models with a primary ID."""
 
     id: int | None = Field(default=None, primary_key=True)
-
-    def save(self, db: "Database") -> Self:
-        """Add (or merge) self into the session, returning tracked row."""
-        if self.id is None:
-            db.add(self)
-        return db.merge(self)
 
 
 class BaseResultRow(BaseRow):
@@ -52,7 +87,7 @@ class BaseResultRow(BaseRow):
         *,
         geo: "GeometryRow",
         model: "ModelRow",
-        prov: dict[Any, Any] | None = None,
+        prov: dict[str, Any] | None = None,
     ) -> Self | None:
         """Query for result matching geometry, model, and provenance."""
         if not geo.id or not model.id:
@@ -75,92 +110,231 @@ class BaseResultRow(BaseRow):
 class BaseLink(SQLModel):
     """Base for models without a primary ID."""
 
-    def save(self, db: "Database") -> Self:
-        """Add (or merge) self into the session.
+    @classmethod
+    def create(cls, *rows: BaseRow, **attrs: object) -> Self:
+        """Construct a link, matching each row to its relationship by type.
 
-        Returns None to discourage duplicate inserts of joint PK.
+        Parameters
+        ----------
+        *rows
+            The rows to link (e.g. a ``GeometryRow`` and a ``CalculationRow``),
+            in any order.
+        **attrs
+            Extra attributes to set on the link (e.g. ``role``).
+
+        Returns
+        -------
+        Self
+            The constructed (unsaved) link row.
         """
-        db.add(self)
-        return self
+        relationships = sa_inspect(cls, raiseerr=True).relationships
+        fields: dict[str, BaseRow] = {}
+        for row in rows:
+            matches = [
+                rel.key
+                for rel in relationships
+                if rel.key not in fields and isinstance(row, rel.mapper.class_)
+            ]
+            if not matches:
+                msg = f"{cls.__name__} has no unmatched relationship for {row!r}."
+                raise ValueError(msg)
+            if len(matches) > 1:
+                # Ambiguous: two+ unfilled relationships share this row's type,
+                # so matching by type alone can't tell them apart (e.g. a link
+                # table with two relationships to the same row model). Raise
+                # rather than silently picking one by declaration order.
+                msg = (
+                    f"{cls.__name__} has multiple unmatched relationships "
+                    f"{matches} for {row!r}; construct this link directly instead."
+                )
+                raise ValueError(msg)
+            fields[matches[0]] = row
+        return cls(**fields, **attrs)
 
 
-# Link tables
-class CalculationGeometryLink(BaseLink, table=True):
-    """Association table linking geometries to a calculation.
+# Geometry table
+class GeometryRow(BaseRow, Geometry, table=True):
+    """Molecular geometry definition and metadata.
+
+    Attributes
+    ----------
+    symbols
+        Atomic symbols in order.
+    coordinates
+        Atomic coordinates in Angstrom.
+    charge
+        Total molecular charge.
+    spin
+        Number of unpaired electrons (2S).
+    energies
+        Energy results computed at this geometry.
+    gradients
+        Gradient results computed at this geometry.
+    hessians
+        Hessian results computed at this geometry.
+    stationary_points
+        Stationary points defined by this geometry.
+    trajectory_links
+        Raw link rows connecting this geometry to trajectories.
+    calculation_links
+        Raw link rows connecting this geometry to calculations.
+    """
+
+    __tablename__ = "geometry"
+
+    symbols: list[str] = Field(sa_column=Column(JSON))
+    coordinates: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
+    charge: int
+    spin: int
+
+    energies: list["EnergyRow"] = Relationship(back_populates="geometry")
+    gradients: list["GradientRow"] = Relationship(back_populates="geometry")
+    hessians: list["HessianRow"] = Relationship(back_populates="geometry")
+    stationary_points: list["StationaryPointRow"] = Relationship(
+        back_populates="geometry"
+    )
+    trajectory_links: list["TrajectoryGeometryLink"] = Relationship(
+        back_populates="geometry"
+    )
+    calculation_links: list["CalculationGeometryLink"] = Relationship(
+        back_populates="geometry"
+    )
+
+    @cached_property
+    def symmetry_number(self) -> int:
+        """Symmetry number from stereo-preserving graph automorphisms.
+
+        Cached per instance since counting graph isomorphisms is expensive.
+        """
+        graph = geom.stereo_mol_graph(self)
+        return _stereo_symmetry_number(graph)
+
+
+# Result tables
+class EnergyRow(BaseResultRow, table=True):
+    """Energy result for a specific geometry and calculation.
 
     Attributes
     ----------
     geometry_id
-        Foreign key to the linked geometry.
+        Foreign key to the geometry this energy was evaluated at.
     calculation_id
-        Foreign key to the linked calculation.
-    role
-        Role the geometry plays for this calculation (input/output).
+        Foreign key to the calculation that produced this energy.
+    value
+        Energy value in Hartree.
     geometry
-        The linked geometry.
+        Geometry this energy was evaluated at.
     calculation
-        The linked calculation.
+        Calculation that produced this energy.
     """
 
-    __tablename__ = "calculation_geometry_link"
+    __tablename__ = "energy"
 
-    geometry_id: int | None = Field(
-        default=None,
-        foreign_key="geometry.id",
-        ondelete="CASCADE",
-        nullable=False,
-        primary_key=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        primary_key=True,
-    )
-    role: Role = Field(sa_column=Column(Enum(Role)))
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
+    value: float
 
-    geometry: "GeometryRow" = Relationship(back_populates="calculation_links")
-    calculation: "CalculationRow" = Relationship(back_populates="geometry_links")
+    calculation: "CalculationRow" = Relationship()
+    geometry: "GeometryRow" = Relationship(back_populates="energies")
 
 
-class CalculationTrajectoryLink(BaseLink, table=True):
-    """Association table linking trajectories to a calculation.
+class GradientRow(BaseResultRow, table=True):
+    """Energy gradient result for a specific geometry and calculation.
 
     Attributes
     ----------
-    trajectory_id
-        Foreign key to the linked trajectory.
+    geometry_id
+        Foreign key to the geometry this gradient was evaluated at.
     calculation_id
-        Foreign key to the linked calculation.
-    role
-        Role the trajectory plays for this calculation (input/output).
-    trajectory
-        The linked trajectory.
+        Foreign key to the calculation that produced this gradient.
+    value
+        Flattened gradient vector in Hartree/Bohr.
+    geometry
+        Geometry this gradient was evaluated at.
     calculation
-        The linked calculation.
+        Calculation that produced this gradient.
     """
 
-    __tablename__ = "calculation_trajectory_link"
+    __tablename__ = "gradient"
+    model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
-    trajectory_id: int | None = Field(
-        default=None,
-        foreign_key="trajectory.id",
-        ondelete="CASCADE",
-        nullable=False,
-        primary_key=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        primary_key=True,
-    )
-    role: Role = Field(sa_column=Column(Enum(Role)))
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
+    value: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
 
-    trajectory: "TrajectoryRow" = Relationship(back_populates="calculation_links")
-    calculation: "CalculationRow" = Relationship(back_populates="trajectory_links")
+    calculation: "CalculationRow" = Relationship()
+    geometry: "GeometryRow" = Relationship(back_populates="gradients")
+
+
+class HessianRow(BaseResultRow, table=True):
+    """Hessian result for a specific geometry and calculation.
+
+    Attributes
+    ----------
+    geometry_id
+        Foreign key to the geometry this Hessian was evaluated at.
+    calculation_id
+        Foreign key to the calculation that produced this Hessian.
+    value
+        Hessian matrix in Hartree/Bohr^2.
+    geometry
+        Geometry this Hessian was evaluated at.
+    calculation
+        Calculation that produced this Hessian.
+    """
+
+    __tablename__ = "hessian"
+    model_config = SQLModelConfig(arbitrary_types_allowed=True)
+
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
+
+    value: np.ndarray = Field(
+        sa_column=Column(CompressedArrayTypeDecorator(dtype=np.float32))
+    )
+
+    calculation: "CalculationRow" = Relationship()
+    geometry: "GeometryRow" = Relationship(back_populates="hessians")
+
+    @cached_property
+    def harmonic_frequencies(self) -> tuple[float, ...]:
+        """Harmonic frequencies derived from the Hessian.
+
+        Cached per instance, since vibrational analysis re-diagonalizes the
+        Hessian on every call and `.order` (used by `_recompute_geometry_
+        stationary_validity` for every sibling Hessian of a geometry, on
+        every relevant flush) depends on it. Invalidated on `value` update
+        by `invalidate_hessian_frequency_cache` in `events.py`.
+        """
+        freqs, _ = geom.vibrational_analysis(geo=self.geometry, hess=self.value)
+        return freqs
+
+    @property
+    def order(self) -> int:
+        """Hessian order."""
+        return sum(1 for f in self.harmonic_frequencies if f < 0.0)
+
+
+# Trajectory table
+class TrajectoryRow(BaseRow, table=True):
+    """Ordered sequence of geometries from a calculation trajectory.
+
+    Attributes
+    ----------
+    geometry_links
+        Raw link rows connecting geometries to this trajectory.
+    calculation_links
+        Raw link rows connecting calculations to this trajectory.
+    """
+
+    __tablename__ = "trajectory"
+
+    geometry_links: list["TrajectoryGeometryLink"] = Relationship(
+        back_populates="trajectory"
+    )
+    calculation_links: list["CalculationTrajectoryLink"] = Relationship(
+        back_populates="trajectory"
+    )
 
 
 class TrajectoryGeometryLink(BaseLink, table=True):
@@ -181,6 +355,9 @@ class TrajectoryGeometryLink(BaseLink, table=True):
     """
 
     __tablename__ = "trajectory_geometry_link"
+    __table_args__ = (
+        Index("ix_trajectory_geometry_link_trajectory_id", "trajectory_id"),
+    )
 
     geometry_id: int | None = Field(
         default=None,
@@ -202,6 +379,11 @@ class TrajectoryGeometryLink(BaseLink, table=True):
     trajectory: "TrajectoryRow" = Relationship(back_populates="geometry_links")
 
 
+# Link tables declared here, ahead of the StationaryPointRow/IdentityRow and
+# StationaryPointRow/StageRow entities they connect, because SQLModel's
+# `link_model=` kwarg needs the actual class object at class-body-evaluation
+# time — unlike every other cross-model reference in this file, it can't be
+# satisfied by a lazily-resolved string forward ref.
 class StationaryIdentityLink(BaseLink, table=True):
     """Association table linking stationary points to chemical identities.
 
@@ -214,6 +396,7 @@ class StationaryIdentityLink(BaseLink, table=True):
     """
 
     __tablename__ = "stationary_identity_link"
+    __table_args__ = (Index("ix_stationary_identity_link_identity_id", "identity_id"),)
 
     stationary_id: int = Field(
         foreign_key="stationary_point.id",
@@ -245,6 +428,7 @@ class StationaryStageLink(BaseLink, table=True):
     """
 
     __tablename__ = "stationary_stage_link"
+    __table_args__ = (Index("ix_stationary_stage_link_stage_id", "stage_id"),)
 
     stationary_id: int | None = Field(
         default=None,
@@ -262,255 +446,6 @@ class StationaryStageLink(BaseLink, table=True):
     )
 
 
-class StepValidationLink(BaseLink, table=True):
-    """Association table linking validations to a step.
-
-    Attributes
-    ----------
-    step_id
-        Foreign key to the linked step.
-    validation_id
-        Foreign key to the linked validation.
-    """
-
-    __tablename__ = "step_validation_link"
-
-    step_id: int = Field(
-        foreign_key="step.id",
-        primary_key=True,
-        ondelete="CASCADE",
-        nullable=False,
-    )
-    validation_id: int = Field(
-        foreign_key="validation.id",
-        primary_key=True,
-        ondelete="CASCADE",
-        nullable=False,
-    )
-
-
-# Result tables
-class EnergyRow(BaseResultRow, table=True):
-    """Energy result for a specific geometry and calculation.
-
-    Attributes
-    ----------
-    geometry_id
-        Foreign key to the geometry this energy was evaluated at.
-    calculation_id
-        Foreign key to the calculation that produced this energy.
-    value
-        Energy value in Hartree.
-    geometry
-        Geometry this energy was evaluated at.
-    calculation
-        Calculation that produced this energy.
-    """
-
-    __tablename__ = "energy"
-
-    geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
-    )
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
-    )
-    value: float
-
-    calculation: "CalculationRow" = Relationship()
-    geometry: "GeometryRow" = Relationship(back_populates="energies")
-
-
-class GradientRow(BaseResultRow, table=True):
-    """Energy gradient result for a specific geometry and calculation.
-
-    Attributes
-    ----------
-    geometry_id
-        Foreign key to the geometry this gradient was evaluated at.
-    calculation_id
-        Foreign key to the calculation that produced this gradient.
-    value
-        Flattened gradient vector in Hartree/Bohr.
-    geometry
-        Geometry this gradient was evaluated at.
-    calculation
-        Calculation that produced this gradient.
-    """
-
-    __tablename__ = "gradient"
-    model_config = SQLModelConfig(arbitrary_types_allowed=True)
-
-    geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
-    )
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
-    )
-    value: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
-
-    calculation: "CalculationRow" = Relationship()
-    geometry: "GeometryRow" = Relationship(back_populates="gradients")
-
-
-class HessianRow(BaseResultRow, table=True):
-    """Hessian result for a specific geometry and calculation.
-
-    Attributes
-    ----------
-    geometry_id
-        Foreign key to the geometry this Hessian was evaluated at.
-    calculation_id
-        Foreign key to the calculation that produced this Hessian.
-    value
-        Hessian matrix in Hartree/Bohr^2.
-    geometry
-        Geometry this Hessian was evaluated at.
-    calculation
-        Calculation that produced this Hessian.
-    """
-
-    __tablename__ = "hessian"
-    model_config = SQLModelConfig(arbitrary_types_allowed=True)
-
-    geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
-    )
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
-    )
-
-    value: np.ndarray = Field(sa_column=Column(Float32BytesTypeDecorator))
-
-    calculation: "CalculationRow" = Relationship()
-    geometry: "GeometryRow" = Relationship(back_populates="hessians")
-
-    @property
-    def harmonic_frequencies(self) -> tuple[float, ...]:
-        """Harmonic frequencies derived from the Hessian."""
-        freqs, _ = geom.vibrational_analysis(geo=self.geometry, hess=self.value)
-        return freqs
-
-    @property
-    def order(self) -> int:
-        """Hessian order."""
-        return sum(1 for f in self.harmonic_frequencies if f < 0.0)
-
-
-# Geometry table
-class GeometryRow(BaseRow, Geometry, table=True):
-    """Molecular geometry definition and metadata.
-
-    Attributes
-    ----------
-    symbols
-        Atomic symbols in order.
-    coordinates
-        Atomic coordinates in Angstrom.
-    charge
-        Total molecular charge.
-    spin
-        Number of unpaired electrons (2S).
-    """
-
-    __tablename__ = "geometry"
-
-    symbols: list[str] = Field(sa_column=Column(JSON))
-    coordinates: FloatArray = Field(sa_column=Column(FloatArrayTypeDecorator))
-    charge: int
-    spin: int
-
-    energies: list["EnergyRow"] = Relationship(back_populates="geometry")
-    gradients: list["GradientRow"] = Relationship(back_populates="geometry")
-    hessians: list["HessianRow"] = Relationship(back_populates="geometry")
-    stationary_points: list["StationaryPointRow"] = Relationship(
-        back_populates="geometry"
-    )
-    trajectory_links: list["TrajectoryGeometryLink"] = Relationship(
-        back_populates="geometry"
-    )
-    calculation_links: list["CalculationGeometryLink"] = Relationship(
-        back_populates="geometry"
-    )
-
-    def calculation_link(
-        self: Self, calc: "CalculationRow", role: Role
-    ) -> CalculationGeometryLink:
-        """Return a CalculationGeometryLink to self."""
-        return CalculationGeometryLink(calculation=calc, geometry=self, role=role)
-
-    def trajectory_link(
-        self: Self, traj: "TrajectoryRow", index: list[int] | None = None
-    ) -> TrajectoryGeometryLink:
-        """Return a TrajectoryGeometryLink to self."""
-        return TrajectoryGeometryLink(trajectory=traj, geometry=self, index=index)
-
-    def stationary_point(
-        self: Self,
-        calc: "CalculationRow",
-        *,
-        order: int = 0,
-        is_pseudo: bool = False,
-        is_valid: bool = False,
-    ) -> "StationaryPointRow":
-        """Return a StationaryPointRow linked to self."""
-        return StationaryPointRow(
-            calculation=calc,
-            geometry=self,
-            order=order,
-            is_pseudo=is_pseudo,
-            is_valid=is_valid,
-        )
-
-    def energy(self: Self, calc: "CalculationRow", value: float) -> "EnergyRow":
-        """Return an EnergyRow linked to self."""
-        return EnergyRow(calculation=calc, geometry=self, value=value)
-
-    def gradient(
-        self: Self, calc: "CalculationRow", value: list[float]
-    ) -> "GradientRow":
-        """Return a GradientRow linked to self."""
-        return GradientRow(calculation=calc, geometry=self, value=np.array(value))
-
-    def hessian(
-        self: Self, calc: "CalculationRow", value: list[list[float]]
-    ) -> "HessianRow":
-        """Return a HessianRow linked to self."""
-        return HessianRow(calculation=calc, geometry=self, value=np.array(value))
-
-
-# Trajectory table
-class TrajectoryRow(BaseRow, table=True):
-    """Ordered sequence of geometries from a calculation trajectory.
-
-    Attributes
-    ----------
-    geometry_links
-        Raw link rows connecting geometries to this trajectory.
-    """
-
-    __tablename__ = "trajectory"
-
-    geometry_links: list["TrajectoryGeometryLink"] = Relationship(
-        back_populates="trajectory"
-    )
-    calculation_links: list["CalculationTrajectoryLink"] = Relationship(
-        back_populates="trajectory"
-    )
-
-    def geometry_link(
-        self: Self, geo: "GeometryRow", index: list[int] | None = None
-    ) -> TrajectoryGeometryLink:
-        """Return a TrajectoryGeometryLink to self."""
-        return TrajectoryGeometryLink(trajectory=self, geometry=geo, index=index)
-
-    def calculation_link(
-        self: Self, calc: "CalculationRow", role: Role
-    ) -> CalculationTrajectoryLink:
-        """Return a CalculationTrajectoryLink to self."""
-        return CalculationTrajectoryLink(calculation=calc, trajectory=self, role=role)
-
-
 # Stationary point rows
 class StationaryPointRow(BaseRow, table=True):
     """A stationary point on a potential energy surface.
@@ -525,24 +460,23 @@ class StationaryPointRow(BaseRow, table=True):
         Hessian index (0 for minima, 1 for first-order saddle points).
     is_pseudo
         Whether this point is not a true stationary point (e.g. constrained).
+    is_valid
+        Whether `order` agrees with the consensus order of its geometry's
+        Hessians (see `autostorage.events.validate_geometry_orders`).
     geometry
         Geometry defining the coordinates of this point.
     calculation
         Calculation that identified this point.
     identities
         Chemical identifiers (e.g. InChI, SMILES) for this point.
-    stage_links
-        Raw link rows connecting this stationary point to reaction stages.
+    stages
+        Reaction stages this stationary point belongs to.
     """
 
     __tablename__ = "stationary_point"
 
-    geometry_id: int | None = Field(
-        default=None, foreign_key="geometry.id", ondelete="CASCADE", nullable=False
-    )
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE", nullable=False
-    )
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
     order: int = 0
     is_pseudo: bool = False
     is_valid: bool = False
@@ -603,6 +537,27 @@ class StationaryPointRow(BaseRow, table=True):
 
         return db.exec_first(stmt)
 
+    def identity(
+        self,
+        *,
+        kind: str | None = None,
+        algorithm: Any | None = None,  # noqa: ANN401
+    ) -> "IdentityRow | None":
+        """Return the first loaded identity matching kind and/or algorithm.
+
+        Searches `self.identities` (the already-loaded relationship list),
+        not the database — use `StationaryPointRow.query` for a DB lookup.
+        """
+        return next(
+            (
+                i
+                for i in self.identities
+                if (kind is None or i.kind == kind)
+                and (algorithm is None or i.algorithm == algorithm)
+            ),
+            None,
+        )
+
 
 class IdentityRow(BaseRow, Identity, table=True):
     """A chemical identifier associated with one or more stationary points.
@@ -622,11 +577,51 @@ class IdentityRow(BaseRow, Identity, table=True):
     """
 
     __tablename__ = "identity"
+    __table_args__ = (
+        UniqueConstraint("kind", "algorithm", "value", name="unique_identity"),
+    )
 
     stationary_points: list["StationaryPointRow"] = Relationship(
         back_populates="identities", link_model=StationaryIdentityLink
     )
     identity_extras: list["IdentityExtraRow"] = Relationship(back_populates="identity")
+
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        *,
+        algorithm: Algorithm,
+        value: str,
+        commit: bool = True,
+    ) -> Self:
+        """Return the matching identity row, creating and saving one if absent.
+
+        `kind` isn't a parameter here since it's fully determined by
+        `algorithm` (see `Identity.from_value`), so matching on
+        `(algorithm, value)` is equivalent to `unique_identity`'s full
+        `(kind, algorithm, value)` constraint.
+
+        Parameters
+        ----------
+        commit, optional
+            If True (default), commit a newly-created row immediately. If
+            False, only flush it (still assigns `.id`), leaving the caller's
+            transaction open — for a caller staging several dedup lookups
+            that must succeed or fail together.
+        """
+        stmt = select(cls).where(cls.algorithm == algorithm, cls.value == value)
+        existing = db.exec_first(stmt)
+        if existing is not None:
+            return existing
+
+        row = cls.from_value(value, algorithm=algorithm)
+        db.add(row)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        return row
 
 
 class IdentityExtraRow(BaseRow, table=True):
@@ -647,7 +642,11 @@ class IdentityExtraRow(BaseRow, table=True):
     __tablename__ = "identity_extras"
 
     identity_id: int | None = Field(
-        default=None, foreign_key="identity.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="identity.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
 
     attribute: str
@@ -664,10 +663,11 @@ class StageRow(BaseRow, table=True):
     ----------
     is_ts
         Whether this stage represents a transition state.
-    step_links
-        Raw link rows connecting this stage to reaction steps, tagged by role.
-    stationary_links
-        Raw link rows connecting this stage to stationary points.
+    stationaries
+        Stationary points that make up this stage.
+    steps
+        Reaction steps referencing this stage as `stage1`, `stage2`, or
+        `stage_ts` (read-only; derived from `StepRow`'s foreign keys).
     """
 
     __tablename__ = "stage"
@@ -719,14 +719,79 @@ class StageRow(BaseRow, table=True):
         )
         return db.exec_first(stmt)
 
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        stationaries: list["StationaryPointRow"],
+        *,
+        is_ts: bool = False,
+    ) -> Self:
+        """Return the matching stage row, creating and saving one if absent.
+
+        Note
+        ----
+        Unlike `ModelRow`/`StepRow`, there is no DB-level uniqueness
+        constraint backing this dedup, so it relies entirely on
+        `StageRow.query`'s app-level lookup.
+        """
+        existing = cls.query(db, stationaries, is_ts=is_ts)
+        if existing is not None:
+            return existing
+
+        row = cls(stationaries=stationaries, is_ts=is_ts)
+        db.add(row)
+        db.commit()
+        return row
+
+
+# Declared here, ahead of StepRow, for the same `link_model=` reason as
+# StationaryIdentityLink/StationaryStageLink above.
+class StepValidationLink(BaseLink, table=True):
+    """Association table linking validations to a step.
+
+    Attributes
+    ----------
+    step_id
+        Foreign key to the linked step.
+    validation_id
+        Foreign key to the linked validation.
+    """
+
+    __tablename__ = "step_validation_link"
+    __table_args__ = (Index("ix_step_validation_link_validation_id", "validation_id"),)
+
+    step_id: int = Field(
+        foreign_key="step.id",
+        primary_key=True,
+        ondelete="CASCADE",
+        nullable=False,
+    )
+    validation_id: int = Field(
+        foreign_key="validation.id",
+        primary_key=True,
+        ondelete="CASCADE",
+        nullable=False,
+    )
+
 
 class StepRow(BaseRow, table=True):
     """An elementary reaction step connecting a reactant, transition state, and product.
 
     Attributes
     ----------
+    stage_id1, stage_id2
+        Foreign keys to the step's two non-TS stages (stored with
+        `stage_id1 < stage_id2`).
+    stage_id_ts
+        Foreign key to the step's transition-state stage, or `None` for a
+        barrierless step.
     is_barrierless
         Whether this step proceeds without a formal transition state.
+    stage1, stage2
+        The step's two non-TS stages.
+    stage_ts
+        The step's transition-state stage, or `None` if barrierless.
     validations
         Validation calculations performed on this step.
     """
@@ -737,6 +802,22 @@ class StepRow(BaseRow, table=True):
             "stage_id1", "stage_id2", "stage_id_ts", name="unq_step_stages"
         ),
         CheckConstraint("stage_id1 < stage_id2", name="chk_stage_order"),
+        # `unq_step_stages` doesn't catch duplicate barrierless steps (stage_id_ts
+        # NULL), since SQL never treats NULL as equal to itself in a unique
+        # constraint. This expression index closes that gap at the DB level,
+        # defense-in-depth alongside `StepRow.query`'s app-level lookup.
+        Index(
+            "unq_step_stages_null_safe",
+            "stage_id1",
+            "stage_id2",
+            text("coalesce(stage_id_ts, 0)"),
+            unique=True,
+        ),
+        # `stage_id1` is already covered as the leading column of the two indexes
+        # above, but is indexed explicitly here too for symmetry/clarity.
+        Index("ix_step_stage_id1", "stage_id1"),
+        Index("ix_step_stage_id2", "stage_id2"),
+        Index("ix_step_stage_id_ts", "stage_id_ts"),
     )
 
     stage_id1: int | None = Field(
@@ -798,6 +879,24 @@ class StepRow(BaseRow, table=True):
         )
         return db.exec_first(stmt)
 
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        stage1: "StageRow",
+        stage2: "StageRow",
+        stage_ts: "StageRow | None" = None,
+    ) -> Self:
+        """Return the matching step row, creating and saving one if absent."""
+        existing = cls.query(db, stage1, stage2, stage_ts)
+        if existing is not None:
+            return existing
+
+        row = cls(stage1=stage1, stage2=stage2, stage_ts=stage_ts)
+        db.add(row)
+        db.commit()
+        return row
+
 
 # Calculation rows
 class ModelRow(BaseRow, table=True):
@@ -824,12 +923,73 @@ class ModelRow(BaseRow, table=True):
             "basis",
             name="unique_model",
         ),
+        # `unique_model` doesn't catch duplicates when `program_version` or `basis`
+        # is NULL (see `find_or_create` below). This expression index closes that
+        # gap at the DB level, defense-in-depth alongside the app-level lookup.
+        Index(
+            "unique_model_null_safe",
+            "program",
+            text("coalesce(program_version, '')"),
+            "method",
+            text("coalesce(basis, '')"),
+            unique=True,
+        ),
     )
 
     program: str
     program_version: str | None = None
     method: str
     basis: str | None = None
+
+    @classmethod
+    def find_or_create(  # noqa: PLR0913
+        cls,
+        db: "Database",
+        *,
+        program: str,
+        method: str,
+        program_version: str | None = None,
+        basis: str | None = None,
+        commit: bool = True,
+    ) -> Self:
+        """Return the matching model row, creating and saving one if absent.
+
+        ``unique_model`` doesn't catch duplicates when ``program_version``
+        or ``basis`` is NULL, since SQL treats NULL as distinct from itself
+        in unique constraints. Callers that don't always supply both should
+        use this instead of constructing and adding a ``ModelRow`` directly,
+        to avoid silently accumulating duplicate rows for the same model.
+
+        Parameters
+        ----------
+        commit, optional
+            If True (default), commit a newly-created row immediately. If
+            False, only flush it (still assigns `.id`), leaving the caller's
+            transaction open — for a caller staging several dedup lookups
+            that must succeed or fail together.
+        """
+        stmt = select(cls).where(
+            cls.program == program,
+            cls.program_version == program_version,
+            cls.method == method,
+            cls.basis == basis,
+        )
+        existing = db.exec_first(stmt)
+        if existing is not None:
+            return existing
+
+        row = cls(
+            program=program,
+            program_version=program_version,
+            method=method,
+            basis=basis,
+        )
+        db.add(row)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        return row
 
 
 class CalculationRow(BaseRow, table=True):
@@ -841,6 +1001,10 @@ class CalculationRow(BaseRow, table=True):
         Foreign key to the model used for this calculation.
     calc_type
         Type of calculation performed.
+    status
+        Lifecycle status of this calculation.
+    error_message
+        Error message recorded for a failed calculation, if any.
     input_provenance
         Metadata describing how the input was generated.
     output_provenance
@@ -849,16 +1013,31 @@ class CalculationRow(BaseRow, table=True):
         Model used for this calculation.
     geometry_links
         Raw link rows connecting geometries to this calculation.
+    trajectory_links
+        Raw link rows connecting trajectories to this calculation.
     """
 
     __tablename__ = "calculation"
 
     model_id: int | None = Field(
-        default=None, foreign_key="model.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="model.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
     calc_type: CalcType = Field(
         sa_column=Column(Enum(CalcType, values_callable=lambda x: [e.value for e in x]))
     )
+    status: CalcStatus = Field(
+        default=CalcStatus.PENDING,
+        sa_column=Column(
+            Enum(CalcStatus, values_callable=lambda x: [e.value for e in x])
+        ),
+    )
+    error_message: str | None = Field(default=None)
+    # Intentionally unbounded free-form JSON; add a size/schema guardrail if
+    # these are ever populated from a less-trusted input path.
     input_provenance: dict[str, Any] | None = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
@@ -874,17 +1053,125 @@ class CalculationRow(BaseRow, table=True):
         back_populates="calculation"
     )
 
-    def geometry_link(
-        self: Self, geo: "GeometryRow", role: Role
-    ) -> CalculationGeometryLink:
-        """Return a CalculationGeometryLink to self."""
-        return CalculationGeometryLink(calculation=self, geometry=geo, role=role)
+    @property
+    def input_geometries(self) -> list["GeometryRow"]:
+        """Geometries linked to this calculation with an INPUT role."""
+        return [
+            link.geometry for link in self.geometry_links if link.role == Role.INPUT
+        ]
 
-    def trajectory_link(
-        self: Self, traj: "TrajectoryRow", role: Role
-    ) -> CalculationTrajectoryLink:
-        """Return a CalculationTrajectoryLink to self."""
-        return CalculationTrajectoryLink(calculation=self, trajectory=traj, role=role)
+    @property
+    def output_geometries(self) -> list["GeometryRow"]:
+        """Geometries linked to this calculation with an OUTPUT role."""
+        return [
+            link.geometry for link in self.geometry_links if link.role == Role.OUTPUT
+        ]
+
+    @property
+    def input_trajectories(self) -> list["TrajectoryRow"]:
+        """Trajectories linked to this calculation with an INPUT role."""
+        return [
+            link.trajectory for link in self.trajectory_links if link.role == Role.INPUT
+        ]
+
+    @property
+    def output_trajectories(self) -> list["TrajectoryRow"]:
+        """Trajectories linked to this calculation with an OUTPUT role."""
+        return [
+            link.trajectory
+            for link in self.trajectory_links
+            if link.role == Role.OUTPUT
+        ]
+
+
+class CalculationGeometryLink(BaseLink, table=True):
+    """Association table linking geometries to a calculation.
+
+    Attributes
+    ----------
+    geometry_id
+        Foreign key to the linked geometry.
+    calculation_id
+        Foreign key to the linked calculation.
+    role
+        Role the geometry plays for this calculation (input/output).
+    geometry
+        The linked geometry.
+    calculation
+        The linked calculation.
+    """
+
+    __tablename__ = "calculation_geometry_link"
+    __table_args__ = (
+        # The composite primary key only serves lookups keyed by `geometry_id`
+        # (its leading column); this adds a matching index for `calculation_id`.
+        Index("ix_calculation_geometry_link_calculation_id", "calculation_id"),
+    )
+
+    geometry_id: int | None = Field(
+        default=None,
+        foreign_key="geometry.id",
+        ondelete="CASCADE",
+        nullable=False,
+        primary_key=True,
+    )
+    calculation_id: int | None = Field(
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        primary_key=True,
+    )
+    role: Role = Field(
+        sa_column=Column(Enum(Role, values_callable=lambda x: [e.value for e in x]))
+    )
+
+    geometry: "GeometryRow" = Relationship(back_populates="calculation_links")
+    calculation: "CalculationRow" = Relationship(back_populates="geometry_links")
+
+
+class CalculationTrajectoryLink(BaseLink, table=True):
+    """Association table linking trajectories to a calculation.
+
+    Attributes
+    ----------
+    trajectory_id
+        Foreign key to the linked trajectory.
+    calculation_id
+        Foreign key to the linked calculation.
+    role
+        Role the trajectory plays for this calculation (input/output).
+    trajectory
+        The linked trajectory.
+    calculation
+        The linked calculation.
+    """
+
+    __tablename__ = "calculation_trajectory_link"
+    __table_args__ = (
+        Index("ix_calculation_trajectory_link_calculation_id", "calculation_id"),
+    )
+
+    trajectory_id: int | None = Field(
+        default=None,
+        foreign_key="trajectory.id",
+        ondelete="CASCADE",
+        nullable=False,
+        primary_key=True,
+    )
+    calculation_id: int | None = Field(
+        default=None,
+        foreign_key="calculation.id",
+        ondelete="CASCADE",
+        nullable=False,
+        primary_key=True,
+    )
+    role: Role = Field(
+        sa_column=Column(Enum(Role, values_callable=lambda x: [e.value for e in x]))
+    )
+
+    trajectory: "TrajectoryRow" = Relationship(back_populates="calculation_links")
+    calculation: "CalculationRow" = Relationship(back_populates="trajectory_links")
 
 
 class ValidationRow(BaseRow, table=True):
@@ -900,16 +1187,17 @@ class ValidationRow(BaseRow, table=True):
         Additional metadata attached to this validation.
     calculation
         Calculation that performed this validation.
+    step
+        Reaction step this validation belongs to.
     """
 
     __tablename__ = "validation"
-    id: int | None = Field(default=None, primary_key=True)
 
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE"
-    )
+    calculation_id: int | None = _fk_field("calculation.id")
 
     method: str
+    # Intentionally unbounded free-form JSON; add a size/schema guardrail if
+    # this is ever populated from a less-trusted input path.
     extras: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     calculation: "CalculationRow" = Relationship()

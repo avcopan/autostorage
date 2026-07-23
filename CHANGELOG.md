@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+
+- **`ModelRow.find_or_create`, `IdentityRow.find_or_create`**: Look up a matching row by content before creating one, with a `commit` flag (default `True`; pass `False` to only flush, leaving the caller's transaction open for staging several dedup lookups that must succeed or fail together). `unique_model`/`unique_identity` don't catch duplicates when a nullable column (`program_version`, `basis`) is `NULL`, since SQL treats `NULL` as distinct from itself in unique constraints — callers constructing and saving a fresh row each time (without every field set) were silently accumulating duplicate rows for the same logical model/identity, which broke downstream lookups keyed on `model_id`/`identity_id`.
+- **`StageRow.find_or_create`, `StepRow.find_or_create`**: Same pattern as `ModelRow.find_or_create`, for stages and steps.
+- **`BaseLink.create(*rows, **attrs)`**: Construct a link row by matching each positional row to its relationship by type (e.g. `CalculationGeometryLink.create(calc, geo, role=Role.INPUT)`), replacing the removed per-row `*_link()` wrapper methods below. Raises if a row's type matches more than one unfilled relationship (e.g. a link table with two relationships to the same row model), rather than silently picking one by declaration order.
+- **`Database.merge_from(source_db, *, commit=True)`** (`autostorage.merge`, new module — `merge_databases()`, `MergeReport`): Copy another database's contents into this one, remapping ids/foreign keys and deduplicating content-unique rows (`ModelRow`, non-auto-managed `IdentityRow`s) against this database's existing data. InChI/conformer identities are deliberately left for `add_inchi_identities`/`assign_conformer_ids` (see `events.py`) to regenerate on insert, so matching conformers collapse onto one shared identity across the merged databases. Nothing commits until every table copies without error. Returns a `MergeReport` of rows copied/reused per table.
+- **`GeometryRow.symmetry_number`**: Cached property (`functools.cached_property`) computing the molecular symmetry number from stereo-preserving graph automorphisms, via `stereomolgraph`. Safe to cache indefinitely since `symbols`/`coordinates` are immutable after insert (`verify_geometry_immutable_fields`).
+- **`autostorage.utils.export_mess_input()`**: Render a sequence of `StepRow`s as MESS `Well`/`Bimolecular`/`Barrier` input blocks, with energies (electronic + harmonic ZPE, relative to a reference stationary point) and symmetry numbers (`GeometryRow.symmetry_number`) resolved from the database. A barrierless step's TS block has no geometry to compute a symmetry number from and gets a flagged `TODO(autostorage)` placeholder instead. Does not emit `Model`/`EnergyRelaxation`/`CollisionFrequency` blocks; the caller must prepend those.
+- **`autostorage.utils.plot_pes()`, `PESPlot`**: Render the same step sequence as a potential energy surface diagram (a Matplotlib figure of level/connector segments along an unlabeled ordinal x-axis), with `PESPlot.save()` and Jupyter rich display (`_repr_png_`) support. A species/TS with no `EnergyRow` at the given model is drawn flagged (dashed, muted gray) rather than omitted.
+- **`examples/stationary_point.py`**: Runnable end-to-end example building a synthetic water optimization + frequency workflow, touching every row model except `StageRow`/`StepRow` and their reaction-specific link tables.
+- **`TimestampMixin`**: Adds server-managed `created_at`/`updated_at` columns to every `BaseRow` subclass.
+- **`CalcStatus`**: Lifecycle status enum (`PENDING`/`RUNNING`/`SUCCEEDED`/`FAILED`) for a new `CalculationRow.status` column (default `PENDING`), paired with a new `CalculationRow.error_message` column.
+- **`CompressedArrayTypeDecorator`**: Stores NumPy arrays as zlib-compressed `.npy` binary data, preserving shape and dtype for arrays of any dimensionality. Replaces `FloatArrayTypeDecorator`/`Float32BytesTypeDecorator` on `GeometryRow.coordinates`, `GradientRow.value`, and `HessianRow.value` — the latter previously stored a flattened, shapeless raw float32 buffer.
+- **`StationaryPointRow.identity(kind=..., algorithm=...)`**: Return the first already-loaded identity matching kind and/or algorithm.
+- **`CalculationRow.input_geometries`, `.output_geometries`, `.input_trajectories`, `.output_trajectories`**: Properties filtering linked geometries/trajectories by `Role`.
+- **`Database.add_all()`**: Bulk counterpart to `add()`.
+- **`Database.get_or_none()`**: Like `get()`, but returns `None` on a miss instead of raising.
+- **`Database.exists()`**: Check whether any row matches a statement via a single `EXISTS` subquery, without materializing a match.
+- **`Database.__enter__`/`__exit__`**: Support `with Database(...) as db:`; rolls back the session on an exception before closing.
+- **`IdentityRow.unique_identity`**: Unique constraint on `(kind, algorithm, value)`.
+- **Reverse-lookup and FK indexes**: Added to the trailing column of every composite-PK link table, to `ModelRow`/`StepRow` (null-safe unique indexes, since their existing unique constraints don't catch duplicates where a nullable column differs only by `NULL`), and to previously-unindexed foreign keys (`CalculationRow.model_id`, and `geometry_id`/`calculation_id` on `EnergyRow`, `GradientRow`, `HessianRow`, `StationaryPointRow`, `ValidationRow`).
+- **Event listeners**: `verify_geometry_immutable_fields` (rejects changes to `GeometryRow.symbols`/`.coordinates` after insert), `verify_stage_ts_consistency` (validates a `StepRow`'s stages agree with it on transition-state status), `revalidate_geometry_orders_on_hessian_delete` (keeps `StationaryPointRow.is_valid` correct when the Hessian establishing order consensus is deleted).
+- **Alembic migrations** (`migrations/`, `alembic.ini`, `pixi run migrate`): Evolve an existing on-disk database's schema in place, targeted via `AUTOSTORAGE_DATABASE_URL`; fresh/in-memory `Database` instances (including tests) are unaffected, still built via `create_all()`.
+
+### Changed
+
+- **`Database` engine**: JSON columns now serialize with sorted keys, so equality filters on JSON columns (e.g. `CalculationRow.input_provenance == prov`) match regardless of the dict's key insertion order.
+- **`Database.exec_all()`**: Now returns a `list` instead of a lazy iterator.
+- **`Database.flush()`**: Also expires all session objects, so an already-loaded object whose row was removed by a DB-level `ondelete="CASCADE"` during the flush reloads (or raises) on next access instead of reading back stale.
+- **`Role` enum columns** (`CalculationGeometryLink.role`, `CalculationTrajectoryLink.role`): Store the enum's `.value` instead of its member name.
+- **`ValidationRow.calculation_id`**: Now `NOT NULL` and indexed.
+- **`HessianRow.harmonic_frequencies`**: Now a `functools.cached_property` instead of a plain `property`, since vibrational analysis re-diagonalizes the Hessian on every call and `.order` (used to recompute `StationaryPointRow.is_valid` for every sibling Hessian of a geometry, on every relevant flush) depends on it. Invalidated automatically on `.value` update by the new `invalidate_hessian_frequency_cache` event listener.
+- **`matplotlib`, `stereomolgraph`**: Now required (not optional/dev-only) dependencies, for `plot_pes()`/`export_mess_input()` and `GeometryRow.symmetry_number` respectively.
+
+### Fixed
+
+- **`Database`**: `PRAGMA foreign_mode=DELETE` (not a valid SQLite pragma) corrected to `PRAGMA journal_mode=DELETE`, the intended WAL-mode fallback.
+- **`GradientRow`/`HessianRow` shape validation, `StationaryPointRow`/`HessianRow` order validation, `StepRow` stage-consistency validation, `add_inchi_identities`, `assign_conformer_ids`**: Now resolve the target's geometry/relationship via the session when only the FK id was set (not the relationship itself), so validation and automatic identity attachment are no longer silently skipped in that case.
+- **`ValidationRow`**: Removed a duplicate explicit `id` field that shadowed the one already provided by `BaseRow`.
+
+### Removed
+
+- **`BaseRow.save()` and `BaseLink.save()`**: Duplicated `Database.add()`/`Database.merge()` with a non-obvious "always commits" side effect. Use `db.add(row)` / `db.merge(row)` directly.
+- **`GeometryRow.calculation_link()`, `.trajectory_link()`, `.stationary_point()`, `.energy()`, `.gradient()`, `.hessian()`**: Unused one-line wrappers around link/result-row constructors. Construct the row directly instead (e.g. `HessianRow(calculation=..., geometry=..., value=...)`).
+- **`TrajectoryRow.geometry_link()`, `.calculation_link()`**: Unused one-line wrappers; construct the link row directly.
+- **`CalculationRow.geometry_link()`, `.trajectory_link()`**: Unused one-line wrappers; construct the link row directly.
 
 ## [0.0.10] - 2026-07-17
 ### Added

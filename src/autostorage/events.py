@@ -1,23 +1,42 @@
-"""Autostorage database events / listeners."""
+"""SQLAlchemy ORM event listeners for validation and auto-managed identities."""
 
+from collections.abc import Iterable
 from typing import Any
 
 import numpy as np
 from automol import Algorithm, geom
 from sqlalchemy import event, tuple_
 from sqlalchemy.engine import Connection
-from sqlalchemy.orm import Mapper
+from sqlalchemy.orm import Mapper, object_session
+from sqlalchemy.orm.attributes import get_history
 from sqlmodel import Integer, Session, cast, func, select
 
-from .exc import ResultShapeError
+from .exc import DataIntegrityError, ResultShapeError
 from .models import (
+    GeometryRow,
     GradientRow,
     HessianRow,
     IdentityExtraRow,
     IdentityRow,
+    StageRow,
     StationaryPointRow,
     StepRow,
 )
+
+
+def _resolve_geometry(
+    target: GradientRow | HessianRow | StationaryPointRow,
+) -> GeometryRow | None:
+    """Return the target's geometry, resolving it via the session if unattached.
+
+    Setting only `geometry_id` leaves `.geometry` unpopulated until the ORM syncs it.
+    """
+    geometry = target.geometry
+    if geometry is None and target.geometry_id is not None:
+        session = object_session(target)
+        if session is not None:
+            geometry = session.get(GeometryRow, target.geometry_id)
+    return geometry
 
 
 @event.listens_for(GradientRow, "before_insert")
@@ -28,10 +47,11 @@ def verify_gradient_shape(
     target: GradientRow,
 ) -> None:
     """Verify shape of the Gradient array before saving to the database."""
-    if not target.geometry:
+    geometry = _resolve_geometry(target)
+    if geometry is None:
         return
 
-    expected = (3 * target.geometry.atom_count,)
+    expected = (3 * geometry.atom_count,)
     actual = np.shape(target.value)
 
     if actual != expected:
@@ -45,16 +65,52 @@ def verify_hessian_shape(
     connection: Connection,  # noqa: ARG001
     target: HessianRow,
 ) -> None:
-    """Verify shape of the Hessian matrix before saving to DB."""
-    if not target.geometry:
+    """Verify shape of the Hessian matrix before saving to the database."""
+    geometry = _resolve_geometry(target)
+    if geometry is None:
         return
 
-    expected_dim = 3 * target.geometry.atom_count
+    expected_dim = 3 * geometry.atom_count
     expected = (expected_dim, expected_dim)
     actual = np.shape(target.value)
 
     if actual != expected:
         raise ResultShapeError(target, actual, expected)
+
+
+@event.listens_for(HessianRow, "before_update")
+def invalidate_hessian_frequency_cache(
+    mapper: Mapper,  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: HessianRow,
+) -> None:
+    """Drop a cached `harmonic_frequencies` if `value` changed."""
+    if get_history(target, "value").added:
+        target.__dict__.pop("harmonic_frequencies", None)
+
+
+def _recompute_geometry_stationary_validity(
+    geometry: GeometryRow, *, excluding: Iterable[HessianRow] = ()
+) -> None:
+    """Recompute `StationaryPointRow.is_valid` for a geometry from its Hessians.
+
+    `excluding` skips Hessians pending deletion (still in `geometry.hessians` at
+    `before_flush` time since the DELETE hasn't been issued yet).
+    """
+    excluded_ids = {id(h) for h in excluding}
+    hessians = [h for h in geometry.hessians if id(h) not in excluded_ids]
+    if not hessians:
+        return
+
+    orders = {h.order for h in hessians if h.order is not None}
+    if len(orders) > 1:
+        msg = f"Geometry Hessians do not agree on order. {orders = }."
+        raise DataIntegrityError(msg)
+
+    if orders and geometry.stationary_points:
+        expected_order = orders.pop()
+        for stationary in geometry.stationary_points:
+            stationary.is_valid = stationary.order == expected_order
 
 
 @event.listens_for(StationaryPointRow, "before_insert")
@@ -66,27 +122,60 @@ def validate_geometry_orders(
     connection: Connection,  # noqa: ARG001
     target: StationaryPointRow | HessianRow,
 ) -> None:
-    """Ensure StationaryPoint and Hessian orders align."""
-    # Ensure there is a geometry reference
-    geometry = getattr(target, "geometry", None)
-    if not geometry:
+    """Ensure `StationaryPointRow`/`HessianRow` orders agree."""
+    geometry = _resolve_geometry(target)
+    if geometry is None:
+        return
+    _recompute_geometry_stationary_validity(geometry)
+
+
+@event.listens_for(Session, "before_flush")
+def revalidate_geometry_orders_on_hessian_delete(
+    session: Session,
+    flush_context: Any,  # noqa: ANN401, ARG001
+    instances: Any,  # noqa: ANN401, ARG001
+) -> None:
+    """Recompute order consensus for a geometry when one of its Hessians is deleted.
+
+    `validate_geometry_orders` only runs on insert/update, so this covers the gap
+    where `is_valid` could go stale after a Hessian is removed.
+    """
+    deleted_hessians = [obj for obj in session.deleted if isinstance(obj, HessianRow)]
+    if not deleted_hessians:
         return
 
-    # Validate that all Hessians on this geometry agree on order
-    if geometry.hessians:
-        orders = {h.order for h in geometry.hessians if h.order is not None}
-        if len(orders) > 1:
-            msg = f"Geometry Hessians do not agree on order. {orders = }."
-            raise ValueError(msg)
+    geometries = {h.geometry_id: h.geometry for h in deleted_hessians if h.geometry}
+    for geometry in geometries.values():
+        excluding = [h for h in deleted_hessians if h.geometry_id == geometry.id]
+        _recompute_geometry_stationary_validity(geometry, excluding=excluding)
 
-        # If they agree, validate the stationary points against that order
-        if orders and geometry.stationary_points:
-            expected_order = orders.pop()
-            for stationary in geometry.stationary_points:
-                if stationary.order == expected_order:
-                    stationary.is_valid = True
-                else:
-                    stationary.is_valid = False
+
+_IMMUTABLE_GEOMETRY_FIELDS = ("symbols", "coordinates")
+
+
+@event.listens_for(GeometryRow, "before_update")
+def verify_geometry_immutable_fields(
+    mapper: Mapper,  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: GeometryRow,
+) -> None:
+    """Reject changes to `symbols`/`coordinates` on an already-persisted geometry.
+
+    Otherwise an in-place edit could invalidate Gradient/Hessian shape checks
+    already run against it.
+    """
+    for attr in _IMMUTABLE_GEOMETRY_FIELDS:
+        history = get_history(target, attr)
+        if history.added or history.deleted:
+            msg = f"GeometryRow.{attr} cannot be changed after insert."
+            raise DataIntegrityError(msg)
+
+
+# Identity algorithms managed here, so other code (e.g. `merge.py`) knows not to
+# copy/attach them explicitly.
+AUTO_MANAGED_IDENTITY_ALGORITHMS: frozenset[Algorithm] = frozenset(
+    {Algorithm.RDKIT_INCHI, Algorithm.IRMSD}
+)
 
 
 @event.listens_for(Session, "before_flush")
@@ -98,12 +187,14 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
     for obj in session.new:
         if not isinstance(obj, StationaryPointRow):
             continue
+        geometry = _resolve_geometry(obj)
+        if geometry is None:
+            continue
         try:
             inchi = IdentityRow.from_geometry(
-                geo=obj.geometry,
-                algorithm=Algorithm.RDKIT_INCHI,
+                geo=geometry, algorithm=Algorithm.RDKIT_INCHI
             )
-            pending_items.append((obj, inchi))
+            pending_items.append((obj, inchi, geometry))
             inchi_lookups.append((inchi.algorithm, inchi.value))
         except ValueError:
             continue
@@ -118,7 +209,7 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 
     identity_map = {(r.algorithm, r.value): r for r in existing_rows}
 
-    for obj, inchi in pending_items:
+    for obj, inchi, geometry in pending_items:
         lookup_key = (inchi.algorithm, inchi.value)
         existing = identity_map.get(lookup_key)
 
@@ -131,7 +222,7 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 
         try:
             smiles = IdentityRow.from_geometry(
-                obj.geometry, algorithm=Algorithm.RDKIT_SMILES
+                geometry, algorithm=Algorithm.RDKIT_SMILES
             )
             smiles_extra = IdentityExtraRow(
                 identity=inchi, attribute="smiles", value=smiles.value
@@ -146,20 +237,28 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 def _matching_conformer_identity(
     obj: StationaryPointRow, inchi: IdentityRow
 ) -> IdentityRow | None:
-    """Find the conformer identity of a geometric duplicate among InChI peers."""
+    """Find the conformer identity of a geometric duplicate among InChI matches."""
     peers = [c for c in inchi.stationary_points if c is not obj]
     if not peers:
         return None
 
-    matches = geom.is_duplicate_conformer(obj.geometry, [c.geometry for c in peers])
+    geometry = _resolve_geometry(obj)
+    if geometry is None:
+        return None
+
+    # Peers may have only `geometry_id` set (e.g. a bulk loader); resolve via session.
+    resolved_peers = [(c, _resolve_geometry(c)) for c in peers]
+    resolved_peers = [(c, g) for c, g in resolved_peers if g is not None]
+    if not resolved_peers:
+        return None
+
+    matches = geom.is_duplicate_conformer(geometry, [g for _, g in resolved_peers])
     match_idx = next((i for i, m in enumerate(matches) if m), None)
     if match_idx is None:
         return None
 
-    matched_peer = peers[match_idx]
-    return next(
-        (i for i in matched_peer.identities if i.kind == Algorithm.IRMSD.kind), None
-    )
+    matched_peer, _ = resolved_peers[match_idx]
+    return matched_peer.identity(kind=Algorithm.IRMSD.kind)
 
 
 @event.listens_for(Session, "before_flush")
@@ -170,12 +269,10 @@ def assign_conformer_ids(session: Session, flush_context: Any, instances: Any) -
     for obj in session.new:
         if not isinstance(obj, StationaryPointRow):
             continue
-        if any(ident.kind == Algorithm.IRMSD.kind for ident in obj.identities):
+        if obj.identity(kind=Algorithm.IRMSD.kind) is not None:
             continue
 
-        inchi = next(
-            (i for i in obj.identities if i.algorithm == Algorithm.RDKIT_INCHI), None
-        )
+        inchi = obj.identity(algorithm=Algorithm.RDKIT_INCHI)
         if inchi is not None:
             pending_items.append((obj, inchi))
 
@@ -192,6 +289,8 @@ def assign_conformer_ids(session: Session, flush_context: Any, instances: Any) -
             continue
 
         if next_group_id is None:
+            # Assumes single-writer; concurrent writers rely on the DB's uniqueness
+            # constraint to fail one session's commit instead.
             current_max = session.exec(
                 select(func.max(cast(IdentityRow.value, Integer))).where(
                     IdentityRow.kind == Algorithm.IRMSD.kind
@@ -214,15 +313,54 @@ def verify_stage_order_and_barrierless(
     connection: Connection,  # noqa: ARG001
     target: StepRow,
 ) -> None:
-    """Verify order of stage ids in StepRow and determine whether barrierless."""
+    """Verify order of stage ids in a `StepRow` and whether it's barrierless."""
     stg_id1 = target.stage_id1 or target.stage1.id
     stg_id2 = target.stage_id2 or target.stage2.id
 
     if not stg_id1 or not stg_id2:
         msg = "Cannot sort stage IDs; IDs aren't assigned to stages."
-        raise ValueError(msg)
+        raise DataIntegrityError(msg)
 
     if stg_id1 > stg_id2:
         target.stage_id1, target.stage_id2 = stg_id2, stg_id1
 
     target.is_barrierless = not target.stage_id_ts
+
+
+def _resolve_stage(target: StepRow, id_attr: str, rel_attr: str) -> StageRow | None:
+    """Return one of a `StepRow`'s stages, resolving via session if unattached.
+
+    Mirrors `_resolve_geometry`.
+    """
+    stage = getattr(target, rel_attr)
+    if stage is None:
+        stage_id = getattr(target, id_attr)
+        if stage_id is not None:
+            session = object_session(target)
+            if session is not None:
+                stage = session.get(StageRow, stage_id)
+    return stage
+
+
+@event.listens_for(StepRow, "before_insert")
+@event.listens_for(StepRow, "before_update")
+def verify_stage_ts_consistency(
+    mapper: Mapper,  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: StepRow,
+) -> None:
+    """Verify `is_ts` agreement between a `StepRow` and its linked stages.
+
+    `stage1`/`stage2` must not be transition-state stages. When `stage_id_ts` is set,
+    the referenced stage must be one.
+    """
+    stage1 = _resolve_stage(target, "stage_id1", "stage1")
+    stage2 = _resolve_stage(target, "stage_id2", "stage2")
+    stage_ts = _resolve_stage(target, "stage_id_ts", "stage_ts")
+
+    if (stage1 is not None and stage1.is_ts) or (stage2 is not None and stage2.is_ts):
+        msg = "Step's stage1/stage2 cannot be a transition-state stage."
+        raise DataIntegrityError(msg)
+    if stage_ts is not None and not stage_ts.is_ts:
+        msg = "Step's stage_ts must reference a transition-state stage."
+        raise DataIntegrityError(msg)

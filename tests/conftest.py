@@ -68,6 +68,6 @@ def calc_geo_link(
     calculation_row: CalculationRow, geometry_row: GeometryRow
 ) -> CalculationGeometryLink:
     """Fixture for CalculationGeometryLink."""
-    return CalculationGeometryLink(
-        calculation=calculation_row, geometry=geometry_row, role=Role.INPUT
+    return CalculationGeometryLink.create(
+        calculation_row, geometry_row, role=Role.INPUT
     )
