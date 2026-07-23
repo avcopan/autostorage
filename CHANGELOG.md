@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [0.0.11] - 2026-07-23
 ### Added
 
 - **`ModelRow.find_or_create`, `IdentityRow.find_or_create`**: Look up a matching row by content before creating one, with a `commit` flag (default `True`; pass `False` to only flush, leaving the caller's transaction open for staging several dedup lookups that must succeed or fail together). `unique_model`/`unique_identity` don't catch duplicates when a nullable column (`program_version`, `basis`) is `NULL`, since SQL treats `NULL` as distinct from itself in unique constraints — callers constructing and saving a fresh row each time (without every field set) were silently accumulating duplicate rows for the same logical model/identity, which broke downstream lookups keyed on `model_id`/`identity_id`.
