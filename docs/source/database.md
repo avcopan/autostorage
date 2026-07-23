@@ -12,15 +12,12 @@ from autostorage import Database
 
 db = Database("workflow.db")       # created if it doesn't exist
 db = Database(":memory:")          # scratch, in-process, gone on close()
-db = Database("workflow.db", echo=True, wal=True)
+db = Database("workflow.db", echo=True)
 ```
 
 - `path` — a filesystem path (`str` or `Path`) or SQLite's special `:memory:` name.
 - `echo` — when `True`, every SQL statement is logged to stdout (passed straight through to
   SQLAlchemy's `create_engine`).
-- `wal` — when `True`, attempts `PRAGMA journal_mode=WAL` on connect for better concurrent
-  read/write throughput; if the backend rejects it, it falls back to `PRAGMA
-  journal_mode=DELETE` (SQLite's default) rather than failing to connect.
 
 On every new DBAPI connection, `Database` also unconditionally issues `PRAGMA
 foreign_keys=ON` — SQLite disables foreign-key enforcement by default, and the `ON DELETE

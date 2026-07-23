@@ -10,7 +10,7 @@ from typing import Self
 
 from sqlalchemy import event
 from sqlalchemy import select as sa_select
-from sqlalchemy.exc import MultipleResultsFound, NoResultFound, OperationalError
+from sqlalchemy.exc import MultipleResultsFound, NoResultFound
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.sql.expression import Select, SelectOfScalar
 
@@ -38,9 +38,7 @@ class Database:
         Persistent database session.
     """
 
-    def __init__(
-        self, path: str | Path, *, echo: bool = False, wal: bool = False
-    ) -> None:
+    def __init__(self, path: str | Path, *, echo: bool = False) -> None:
         """
         Initialize database connection manager.
 
@@ -51,9 +49,6 @@ class Database:
         echo, optional
             If True, SQL statements will be logged to the standard output.
             If False, no logging is performed.
-        wal, optional
-            If True, attempt to enable WAL journal mode for better concurrent
-            read/write performance.
         """
         self.path = Path(path)
         self.engine = create_engine(
@@ -69,13 +64,8 @@ class Database:
 
         @event.listens_for(self.engine, "connect")
         def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:  # noqa: ANN001
-            """Set WAL pragma."""
+            """Set SQLite pragmas."""
             cursor = dbapi_connection.cursor()
-            if wal:
-                try:
-                    cursor.execute("PRAGMA journal_mode=WAL")
-                except OperationalError:
-                    cursor.execute("PRAGMA journal_mode=DELETE")
             # SQLite ignores FK constraints unless enabled
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
