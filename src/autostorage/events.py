@@ -1,4 +1,4 @@
-"""Autostorage database events / listeners."""
+"""SQLAlchemy ORM event listeners for validation and auto-managed identities."""
 
 from collections.abc import Iterable
 from typing import Any
@@ -67,7 +67,7 @@ def verify_hessian_shape(
     connection: Connection,  # noqa: ARG001
     target: HessianRow,
 ) -> None:
-    """Verify shape of the Hessian matrix before saving to DB."""
+    """Verify shape of the Hessian matrix before saving to the database."""
     geometry = _resolve_geometry(target)
     if geometry is None:
         return
@@ -139,7 +139,7 @@ def validate_geometry_orders(
     connection: Connection,  # noqa: ARG001
     target: StationaryPointRow | HessianRow,
 ) -> None:
-    """Ensure StationaryPoint and Hessian orders align."""
+    """Ensure `StationaryPointRow`/`HessianRow` orders agree."""
     geometry = _resolve_geometry(target)
     if geometry is None:
         return
@@ -351,7 +351,7 @@ def verify_stage_order_and_barrierless(
     connection: Connection,  # noqa: ARG001
     target: StepRow,
 ) -> None:
-    """Verify order of stage ids in StepRow and determine whether barrierless."""
+    """Verify order of stage ids in a `StepRow` and whether it's barrierless."""
     stg_id1 = target.stage_id1 or target.stage1.id
     stg_id2 = target.stage_id2 or target.stage2.id
 
@@ -366,7 +366,7 @@ def verify_stage_order_and_barrierless(
 
 
 def _resolve_stage(target: StepRow, id_attr: str, rel_attr: str) -> StageRow | None:
-    """Return one of a StepRow's stages, resolving via session if unattached.
+    """Return one of a `StepRow`'s stages, resolving via session if unattached.
 
     Mirrors `_resolve_geometry`: setting only the FK id (e.g. `stage_id_ts`)
     without the relationship (`stage_ts`) leaves it unpopulated until the ORM
@@ -390,7 +390,7 @@ def verify_stage_ts_consistency(
     connection: Connection,  # noqa: ARG001
     target: StepRow,
 ) -> None:
-    """Verify is_ts agreement between a StepRow and its linked stages.
+    """Verify `is_ts` agreement between a `StepRow` and its linked stages.
 
     `stage1`/`stage2` must not be transition-state stages; when
     `stage_id_ts` is set, the referenced stage must be one.

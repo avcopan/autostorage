@@ -1,4 +1,4 @@
-"""Database connection."""
+"""SQLite database connection and session management."""
 
 import json
 from collections.abc import Iterable, Iterator

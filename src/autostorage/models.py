@@ -1,4 +1,4 @@
-"""Autostorage models."""
+"""SQLModel row definitions for autostorage's persistence schema."""
 
 from datetime import datetime
 from functools import cached_property
@@ -166,6 +166,18 @@ class GeometryRow(BaseRow, Geometry, table=True):
         Total molecular charge.
     spin
         Number of unpaired electrons (2S).
+    energies
+        Energy results computed at this geometry.
+    gradients
+        Gradient results computed at this geometry.
+    hessians
+        Hessian results computed at this geometry.
+    stationary_points
+        Stationary points defined by this geometry.
+    trajectory_links
+        Raw link rows connecting this geometry to trajectories.
+    calculation_links
+        Raw link rows connecting this geometry to calculations.
     """
 
     __tablename__ = "geometry"
@@ -315,6 +327,8 @@ class TrajectoryRow(BaseRow, table=True):
     ----------
     geometry_links
         Raw link rows connecting geometries to this trajectory.
+    calculation_links
+        Raw link rows connecting calculations to this trajectory.
     """
 
     __tablename__ = "trajectory"
@@ -450,14 +464,17 @@ class StationaryPointRow(BaseRow, table=True):
         Hessian index (0 for minima, 1 for first-order saddle points).
     is_pseudo
         Whether this point is not a true stationary point (e.g. constrained).
+    is_valid
+        Whether `order` agrees with the consensus order of its geometry's
+        Hessians (see `autostorage.events.validate_geometry_orders`).
     geometry
         Geometry defining the coordinates of this point.
     calculation
         Calculation that identified this point.
     identities
         Chemical identifiers (e.g. InChI, SMILES) for this point.
-    stage_links
-        Raw link rows connecting this stationary point to reaction stages.
+    stages
+        Reaction stages this stationary point belongs to.
     """
 
     __tablename__ = "stationary_point"
@@ -650,10 +667,11 @@ class StageRow(BaseRow, table=True):
     ----------
     is_ts
         Whether this stage represents a transition state.
-    step_links
-        Raw link rows connecting this stage to reaction steps, tagged by role.
-    stationary_links
-        Raw link rows connecting this stage to stationary points.
+    stationaries
+        Stationary points that make up this stage.
+    steps
+        Reaction steps referencing this stage as `stage1`, `stage2`, or
+        `stage_ts` (read-only; derived from `StepRow`'s foreign keys).
     """
 
     __tablename__ = "stage"
@@ -766,8 +784,18 @@ class StepRow(BaseRow, table=True):
 
     Attributes
     ----------
+    stage_id1, stage_id2
+        Foreign keys to the step's two non-TS stages (stored with
+        `stage_id1 < stage_id2`).
+    stage_id_ts
+        Foreign key to the step's transition-state stage, or `None` for a
+        barrierless step.
     is_barrierless
         Whether this step proceeds without a formal transition state.
+    stage1, stage2
+        The step's two non-TS stages.
+    stage_ts
+        The step's transition-state stage, or `None` if barrierless.
     validations
         Validation calculations performed on this step.
     """
@@ -989,6 +1017,8 @@ class CalculationRow(BaseRow, table=True):
         Model used for this calculation.
     geometry_links
         Raw link rows connecting geometries to this calculation.
+    trajectory_links
+        Raw link rows connecting trajectories to this calculation.
     """
 
     __tablename__ = "calculation"
@@ -1161,6 +1191,8 @@ class ValidationRow(BaseRow, table=True):
         Additional metadata attached to this validation.
     calculation
         Calculation that performed this validation.
+    step
+        Reaction step this validation belongs to.
     """
 
     __tablename__ = "validation"

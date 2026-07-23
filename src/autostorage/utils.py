@@ -1,4 +1,4 @@
-"""Autostorage utilities."""
+"""MESS input export and potential energy surface plotting."""
 
 import io
 from collections.abc import Sequence
@@ -25,34 +25,24 @@ from .models import (
 if TYPE_CHECKING:
     from .database import Database
 
-# CODATA Hartree -> kcal/mol; `automol.utils.constants` has no molar-energy
-# conversion, and adding one there is out of scope for this feature.
+# CODATA Hartree -> kcal/mol (automol.utils.constants has no molar-energy conversion).
 HARTREE_TO_KCAL_PER_MOL = 627.5094740631
 
-# Ground-state electronic levels (energy in 1/cm, degeneracy) for species whose
-# low-lying spin-orbit splitting is significant enough to matter for a
-# master-equation calculation. Every other species defaults to a single
-# ground-state level at 0 1/cm with degeneracy `spin + 1`. Keyed by Hill
-# formula (`automol.geom.hill_formula`) so extending this to other radicals
-# later is a one-line addition.
+# Non-default ground-state electronic levels (energy 1/cm, degeneracy), keyed by Hill
+# formula. Species not listed here default to a single level at 0 1/cm, degeneracy
+# spin + 1.
 _ELECTRONIC_LEVELS_BY_HILL_FORMULA: dict[str, tuple[tuple[float, int], ...]] = {
     "HO": ((0.0, 2), (140.0, 2)),
 }
 
-# Symmetry numbers are computed from `GeometryRow.symmetry_number` wherever a
-# geometry is available. The one exception is a barrierless step's TS block,
-# which has no geometry at all (see `_render_barrierless_placeholder_block`)
-# and so falls back to this placeholder, which must be checked by hand before
-# the generated file is used for a real calculation.
+# Fallback for a barrierless step's TS block, which has no geometry to compute a
+# symmetry number from; must be checked by hand.
 _SYMMETRY_NUMBER_PLACEHOLDER = (
     "1  ! TODO(autostorage): placeholder -- "
     "no TS geometry to compute a symmetry number from, verify manually"
 )
 
-# PES plot rendering constants. Grayscale-only: a single reaction path isn't a
-# categorical comparison, so hue would encode nothing. Dashed + muted gray
-# means "flagged" (missing energy), matching the flag-don't-crash philosophy
-# already used by `_render_zero_energy_block`'s TODO placeholder.
+# PES plot rendering constants. Grayscale only; dashed + muted gray flags missing data.
 _LEVEL_HALF_WIDTH = 0.3
 _LEVEL_COLOR = "black"
 _LEVEL_LINEWIDTH = 2.5
@@ -171,11 +161,40 @@ def _relative_energy_kcal(
     return (value_hartree - ref_hartree) * HARTREE_TO_KCAL_PER_MOL
 
 
+def _zpe_hartree(geo: GeometryRow, frequencies: tuple[float, ...] | None) -> float:
+    """Return the harmonic ZPE correction for `frequencies`, or 0.0 if `None`."""
+    if not frequencies:
+        return 0.0
+    return geom.harmonic_zpv(geo, hess=[], freqs=frequencies)
+
+
+def _zpe_corrected_energy_hartree(
+    db: "Database",
+    geo: GeometryRow,
+    model: ModelRow,
+    *,
+    frequencies: tuple[float, ...] | None = None,
+) -> float | None:
+    """Return the ZPE-corrected Hartree energy of `geo` at `model`.
+
+    Falls back to the bare electronic energy if `frequencies` is `None` and
+    no `HessianRow` is found at `model`. Returns `None` if no `EnergyRow` is
+    found.
+    """
+    value_hartree = _energy_hartree(db, geo, model)
+    if value_hartree is None:
+        return None
+    if frequencies is None:
+        hessian = HessianRow.query(db, geo=geo, model=model)
+        frequencies = hessian.harmonic_frequencies if hessian is not None else None
+    return value_hartree + _zpe_hartree(geo, frequencies)
+
+
 def _resolve_ref_hartree(
     db: "Database", ref: StationaryPointRow, model: ModelRow
 ) -> float:
-    """Return the Hartree energy of `ref` at `model`, raising if not found."""
-    ref_hartree = _energy_hartree(db, ref.geometry, model)
+    """Return the ZPE-corrected Hartree energy of `ref`, raising if not found."""
+    ref_hartree = _zpe_corrected_energy_hartree(db, ref.geometry, model)
     if ref_hartree is None:
         msg = (
             f"No EnergyRow found for reference geometry {ref.geometry.id} "
@@ -186,11 +205,7 @@ def _resolve_ref_hartree(
 
 
 def _electronic_levels(geo: GeometryRow) -> tuple[tuple[float, int], ...]:
-    """Return `(energy_cm1, degeneracy)` ground-state electronic levels for `geo`.
-
-    Ground-state only (energy 0, degeneracy = `spin + 1`) for every species,
-    except the small lookup table in `_ELECTRONIC_LEVELS_BY_HILL_FORMULA`.
-    """
+    """Return `(energy_cm1, degeneracy)` ground-state electronic levels for `geo`."""
     formula = geom.hill_formula(geo)
     if formula in _ELECTRONIC_LEVELS_BY_HILL_FORMULA:
         return _ELECTRONIC_LEVELS_BY_HILL_FORMULA[formula]
@@ -255,9 +270,8 @@ def _render_zero_energy_block(
 def _render_fragment_zero_energy_block() -> str:
     """Render a fragment's `ZeroEnergy[1/cm]` line.
 
-    Always 0 -- an isolated fragment has no energy reference of its own; the
-    enclosing `Bimolecular` block's `GroundEnergy[kcal/mol]` line carries the
-    actual relative energy of the pair.
+    Always 0; the enclosing `Bimolecular` block's `GroundEnergy` line carries
+    the pair's relative energy.
     """
     return "ZeroEnergy[1/cm]  0"
 
@@ -265,9 +279,7 @@ def _render_fragment_zero_energy_block() -> str:
 def _render_core_rigidrotor_block(symmetry_number: int | None) -> str:
     """Render a MESS `Core RigidRotor` block.
 
-    Falls back to a flagged placeholder when `symmetry_number` is `None`
-    (only for a barrierless step's TS block, which has no geometry to
-    compute one from).
+    Falls back to a flagged placeholder when `symmetry_number` is `None`.
     """
     factor = (
         _SYMMETRY_NUMBER_PLACEHOLDER if symmetry_number is None else symmetry_number
@@ -358,18 +370,17 @@ def _build_species_data(  # noqa: PLR0913
         _build_fragment_data(db, s, model=model)
         for s in sorted(stage.stationaries, key=lambda s: s.id or 0)
     )
-    if len(fragments) == 1:
-        value_hartree = _energy_hartree(db, fragments[0].geometry, model)
-        zero_energy_kcal = _relative_energy_kcal(value_hartree, ref_hartree)
-    else:
-        values_hartree = [
-            _energy_hartree(db, fragment.geometry, model) for fragment in fragments
-        ]
-        zero_energy_kcal = (
-            None
-            if any(value is None for value in values_hartree)
-            else _relative_energy_kcal(sum(values_hartree), ref_hartree)
+    values_hartree = [
+        _zpe_corrected_energy_hartree(
+            db, fragment.geometry, model, frequencies=fragment.frequencies
         )
+        for fragment in fragments
+    ]
+    zero_energy_kcal = (
+        None
+        if any(value is None for value in values_hartree)
+        else _relative_energy_kcal(sum(values_hartree), ref_hartree)
+    )
     return _SpeciesData(
         stage=stage,
         label=label,
@@ -399,7 +410,10 @@ def _render_barrier_block(  # noqa: PLR0913
         if hessian is not None
         else None
     )
-    value_hartree = _energy_hartree(db, ts_geometry, model)
+    ts_frequencies = hessian.harmonic_frequencies if hessian is not None else None
+    value_hartree = _zpe_corrected_energy_hartree(
+        db, ts_geometry, model, frequencies=ts_frequencies
+    )
     zero_energy_kcal = _relative_energy_kcal(value_hartree, ref_hartree)
 
     header = (
@@ -427,9 +441,7 @@ def _render_barrierless_placeholder_block(
 ) -> str:
     """Render a placeholder `Barrier` block for a step with no transition state.
 
-    MESS's barrierless treatment (phase-space theory / variational flux)
-    needs long-range potential parameters that autostorage does not store;
-    this output is not directly MESS-runnable and must be completed by hand.
+    Not directly MESS-runnable; must be completed by hand.
     """
     del step  # kept in the signature for symmetry with `_render_barrier_block`
     energies = [
@@ -481,26 +493,19 @@ def export_mess_input(  # noqa: PLR0913
 ) -> str:
     """Render `steps` as MESS `Well`/`Bimolecular`/`Barrier` input blocks.
 
-    Wells and bimolecular species are derived from the unique, non-TS stages
-    referenced by `steps` (first-encounter order), auto-labeled `W1, W2, ...`
-    (single-stationary stages) / `P1, P2, ...` (multi-stationary stages) and
-    commented with a Hill-formula-based name, unless overridden via `labels`/
-    `names` (keyed by `StageRow.id`). Each step becomes one `Barrier` block,
-    auto-labeled `B1, B2, ...` in `steps` order; a step with no transition
-    state (`StepRow.is_barrierless`) instead gets a placeholder block flagged
-    with `TODO(autostorage)` comments, since MESS's barrierless treatment
-    needs long-range potential parameters this schema doesn't store.
+    Non-TS stages become `Well`/`Bimolecular` blocks, auto-labeled
+    `W1, W2, ...`/`P1, P2, ...` and named by Hill formula, unless overridden
+    via `labels`/`names` (keyed by `StageRow.id`). Each step becomes one
+    `Barrier` block, auto-labeled `B1, B2, ...`; a barrierless step instead
+    gets a `TODO(autostorage)`-flagged placeholder.
 
-    All energies (`ZeroEnergy`/`GroundEnergy[kcal/mol]`) are the bare
-    electronic energy (`EnergyRow.value`) at `model`, relative to `ref` --
-    not ZPE-corrected, since MESS applies its own ZPE handling from the
-    `Frequencies` block. Symmetry numbers (`SymmetryFactor`) are computed
-    from each species'/barrier's geometry via `GeometryRow.symmetry_number`,
-    except for a barrierless step's TS block, which has no geometry and so
-    gets a flagged placeholder instead. This function does not emit
-    `Model`/`EnergyRelaxation`/`CollisionFrequency` blocks -- those are
-    simulation setup, not stored reaction data, and must be prepended by the
-    caller.
+    Energies are the electronic energy at `model` plus the harmonic
+    zero-point energy from each geometry's `HessianRow` at `model` (falling
+    back to the bare electronic energy where no such `HessianRow` exists),
+    relative to `ref`. Symmetry numbers come from `GeometryRow.symmetry_
+    number`, except a barrierless step's TS block, which has no geometry.
+    Does not emit `Model`/`EnergyRelaxation`/`CollisionFrequency` blocks; the
+    caller must prepend those.
 
     Parameters
     ----------
@@ -712,8 +717,7 @@ def _draw_connector(  # noqa: PLR0913
 ) -> None:
     """Draw a connector line between two levels' inner edges.
 
-    Sorts by x first -- a step's `stage1`/`stage2` are ordered by ascending
-    database id, not by x-position, so `x1 < x2` cannot be assumed.
+    Sorts by x first, since `x1 < x2` cannot be assumed.
     """
     (left_x, left), (right_x, right) = sorted(
         [(x1, placement1), (x2, placement2)], key=lambda pair: pair[0]
@@ -757,24 +761,19 @@ def plot_pes(  # noqa: PLR0913
 ) -> PESPlot:
     r"""Render `steps` as a potential energy surface diagram.
 
-    Wells and bimolecular species are derived the same way as
-    `export_mess_input`: the unique, non-TS stages referenced by `steps`
-    (first-encounter order), auto-labeled `W1, W2, ...` / `P1, P2, ...` and
-    named by Hill formula, unless overridden via `labels`/`names` (keyed by
-    `StageRow.id`). Each is drawn as a flat horizontal "level" segment
-    positioned along an unlabeled, ordinal x-axis (first-encounter order --
-    *not* a guaranteed chemical reaction direction, since stage insertion
-    order need not match "reactant to product"). Each step becomes a peak at
-    its transition state (labeled `B1, B2, ...` in `steps` order, positioned
-    midway between its two stages), connected to both stages by diagonal
-    lines; a barrierless step instead draws one direct dashed connector with
-    no peak.
+    Wells/bimolecular species are derived the same way as
+    `export_mess_input` and drawn as flat "level" segments along an
+    unlabeled, ordinal x-axis (first-encounter order, not necessarily
+    reactant-to-product). Each step becomes a peak at its transition state
+    (labeled `B1, B2, ...`), connected to both stages by diagonal lines; a
+    barrierless step instead draws one direct dashed connector with no peak.
 
-    All energies are the bare electronic energy (`EnergyRow.value`) at
-    `model`, relative to `ref`, in kcal/mol. A species or transition state
-    with no `EnergyRow` at `model` is drawn at 0.0 kcal/mol in a flagged
-    (dashed, muted gray) style with " (no energy data)" appended to its
-    label, rather than being omitted or raising.
+    Energies are the electronic energy at `model` plus the harmonic
+    zero-point energy from each geometry's `HessianRow` at `model` (falling
+    back to the bare electronic energy where no such `HessianRow` exists),
+    relative to `ref`, in kcal/mol. A species/TS with no `EnergyRow` at
+    `model` is drawn at 0.0 kcal/mol in a flagged (dashed, muted gray) style
+    with " (no energy data)" appended to its label.
 
     Parameters
     ----------
@@ -920,7 +919,9 @@ def plot_pes(  # noqa: PLR0913
         else:
             ts_stage = step.stage_ts
             (ts_stationary,) = ts_stage.stationaries
-            ts_value_hartree = _energy_hartree(db, ts_stationary.geometry, model)
+            ts_value_hartree = _zpe_corrected_energy_hartree(
+                db, ts_stationary.geometry, model
+            )
             ts_energy_kcal = _relative_energy_kcal(ts_value_hartree, ref_hartree)
             x_ts = (x1 + x2) / 2
             ts_placement = _draw_level(
