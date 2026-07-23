@@ -2,6 +2,7 @@
 
 import pytest
 from numpy.random import Generator
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -177,3 +178,25 @@ def test__session_rolls_back_on_generic_error(
     database.add(unrelated)
     database.commit()
     assert unrelated.id
+
+
+def test__link_table_reverse_lookup_indexes_exist(database: Database) -> None:
+    """Test that the trailing column of each composite-PK link table is indexed.
+
+    The composite primary key on each of these tables only serves lookups keyed
+    by its leading column; each also needs its own index for the other direction.
+    """
+    expected = {
+        "calculation_geometry_link": "calculation_id",
+        "calculation_trajectory_link": "calculation_id",
+        "trajectory_geometry_link": "trajectory_id",
+        "stationary_identity_link": "identity_id",
+        "stationary_stage_link": "stage_id",
+        "step_validation_link": "validation_id",
+    }
+    inspector = inspect(database.engine)
+    for table, column in expected.items():
+        indexed_columns = {
+            name for idx in inspector.get_indexes(table) for name in idx["column_names"]
+        }
+        assert column in indexed_columns

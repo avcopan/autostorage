@@ -10,6 +10,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 
 __all__ = [
+    "CalcStatus",
     "CalcType",
     "CompressedArrayTypeDecorator",
     "Role",
@@ -104,3 +105,24 @@ class CalcType(StrEnum):
     THERMO = "thermochemistry"
     # Fallback
     UNDEFINED = "undefined"
+
+
+class CalcStatus(StrEnum):
+    """Lifecycle status of a calculation.
+
+    Attributes
+    ----------
+    PENDING
+        Queued but not yet started.
+    RUNNING
+        Currently executing.
+    SUCCEEDED
+        Completed successfully.
+    FAILED
+        Terminated with an error.
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"

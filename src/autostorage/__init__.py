@@ -20,9 +20,10 @@ from .models import (
     TrajectoryRow,
     ValidationRow,
 )
-from .types import CalcType, Role
+from .types import CalcStatus, CalcType, Role
 
 __all__ = [
+    "CalcStatus",
     "CalcType",
     "CalculationGeometryLink",
     "CalculationRow",

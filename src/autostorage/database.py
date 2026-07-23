@@ -1,7 +1,9 @@
 """Database connection."""
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
+from functools import partial
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -55,6 +57,10 @@ class Database:
         self.engine = create_engine(
             f"sqlite:///{self.path}",
             echo=echo,
+            # Canonicalize dict key order so JSON-column equality filters (e.g.
+            # `CalculationRow.input_provenance == prov`) match regardless of the
+            # key insertion order used to build the Python dict being compared.
+            json_serializer=partial(json.dumps, sort_keys=True),
             # Allow multithreading
             connect_args={"check_same_thread": False},
         )

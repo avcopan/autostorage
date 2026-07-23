@@ -26,6 +26,7 @@ module-name = "autostorage"
 exclude = [
     "docs",
     "**/*.ipynb",
+    "migrations",
 ]
 
 [tool.ruff.lint]

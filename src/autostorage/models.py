@@ -1,17 +1,20 @@
 """Autostorage models."""
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Self, dataclass_transform
 
 import numpy as np
 from automol import Geometry, Identity, geom
 from automol.utils.types import FloatArray
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import text
 from sqlmodel import (
     JSON,
     CheckConstraint,
     Column,
     Enum,
     Field,
+    Index,
     Relationship,
     SQLModel,
     UniqueConstraint,
@@ -22,14 +25,47 @@ from sqlmodel.main import SQLModelConfig
 
 from autostorage.exc import MissingPrimaryKeyError
 
-from .types import CalcType, CompressedArrayTypeDecorator, Role
+from .types import CalcStatus, CalcType, CompressedArrayTypeDecorator, Role
 
 if TYPE_CHECKING:
     from .database import Database
 
 
+def _fk_field(target: str, *, nullable: bool = False, index: bool = True) -> Any:  # noqa: ANN401
+    """Build a standard foreign-key Field with ON DELETE CASCADE."""
+    return Field(
+        default=None,
+        foreign_key=target,
+        ondelete="CASCADE",
+        nullable=nullable,
+        index=index,
+    )
+
+
 @dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
-class BaseRow(SQLModel):
+class TimestampMixin(SQLModel):
+    """Mixin adding server-managed creation/update timestamps.
+
+    Annotated as `datetime | None` since the value is unset in Python until the
+    database fills it in via `server_default`/`onupdate`; `nullable=False`
+    overrides the `NULL`-by-default column that an Optional annotation would
+    otherwise produce, since the DB always has a value once the row is flushed.
+    """
+
+    created_at: datetime | None = Field(
+        default=None,
+        nullable=False,
+        sa_column_kwargs={"server_default": func.now()},
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        nullable=False,
+        sa_column_kwargs={"server_default": func.now(), "onupdate": func.now()},
+    )
+
+
+@dataclass_transform(kw_only_default=True, field_specifiers=(Field,))
+class BaseRow(TimestampMixin, SQLModel):
     """Base for models with a primary ID."""
 
     id: int | None = Field(default=None, primary_key=True)
@@ -124,6 +160,11 @@ class CalculationGeometryLink(BaseLink, table=True):
     """
 
     __tablename__ = "calculation_geometry_link"
+    __table_args__ = (
+        # The composite primary key only serves lookups keyed by `geometry_id`
+        # (its leading column); this adds a matching index for `calculation_id`.
+        Index("ix_calculation_geometry_link_calculation_id", "calculation_id"),
+    )
 
     geometry_id: int | None = Field(
         default=None,
@@ -165,6 +206,9 @@ class CalculationTrajectoryLink(BaseLink, table=True):
     """
 
     __tablename__ = "calculation_trajectory_link"
+    __table_args__ = (
+        Index("ix_calculation_trajectory_link_calculation_id", "calculation_id"),
+    )
 
     trajectory_id: int | None = Field(
         default=None,
@@ -206,6 +250,9 @@ class TrajectoryGeometryLink(BaseLink, table=True):
     """
 
     __tablename__ = "trajectory_geometry_link"
+    __table_args__ = (
+        Index("ix_trajectory_geometry_link_trajectory_id", "trajectory_id"),
+    )
 
     geometry_id: int | None = Field(
         default=None,
@@ -239,6 +286,7 @@ class StationaryIdentityLink(BaseLink, table=True):
     """
 
     __tablename__ = "stationary_identity_link"
+    __table_args__ = (Index("ix_stationary_identity_link_identity_id", "identity_id"),)
 
     stationary_id: int = Field(
         foreign_key="stationary_point.id",
@@ -270,6 +318,7 @@ class StationaryStageLink(BaseLink, table=True):
     """
 
     __tablename__ = "stationary_stage_link"
+    __table_args__ = (Index("ix_stationary_stage_link_stage_id", "stage_id"),)
 
     stationary_id: int | None = Field(
         default=None,
@@ -299,6 +348,7 @@ class StepValidationLink(BaseLink, table=True):
     """
 
     __tablename__ = "step_validation_link"
+    __table_args__ = (Index("ix_step_validation_link_validation_id", "validation_id"),)
 
     step_id: int = Field(
         foreign_key="step.id",
@@ -334,20 +384,8 @@ class EnergyRow(BaseResultRow, table=True):
 
     __tablename__ = "energy"
 
-    geometry_id: int | None = Field(
-        default=None,
-        foreign_key="geometry.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
     value: float
 
     calculation: "CalculationRow" = Relationship()
@@ -374,20 +412,8 @@ class GradientRow(BaseResultRow, table=True):
     __tablename__ = "gradient"
     model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
-    geometry_id: int | None = Field(
-        default=None,
-        foreign_key="geometry.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
     value: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
 
     calculation: "CalculationRow" = Relationship()
@@ -414,20 +440,8 @@ class HessianRow(BaseResultRow, table=True):
     __tablename__ = "hessian"
     model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
-    geometry_id: int | None = Field(
-        default=None,
-        foreign_key="geometry.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
 
     value: np.ndarray = Field(
         sa_column=Column(CompressedArrayTypeDecorator(dtype=np.float32))
@@ -531,20 +545,8 @@ class StationaryPointRow(BaseRow, table=True):
 
     __tablename__ = "stationary_point"
 
-    geometry_id: int | None = Field(
-        default=None,
-        foreign_key="geometry.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
-    calculation_id: int | None = Field(
-        default=None,
-        foreign_key="calculation.id",
-        ondelete="CASCADE",
-        nullable=False,
-        index=True,
-    )
+    geometry_id: int | None = _fk_field("geometry.id")
+    calculation_id: int | None = _fk_field("calculation.id")
     order: int = 0
     is_pseudo: bool = False
     is_valid: bool = False
@@ -652,7 +654,11 @@ class IdentityExtraRow(BaseRow, table=True):
     __tablename__ = "identity_extras"
 
     identity_id: int | None = Field(
-        default=None, foreign_key="identity.id", ondelete="CASCADE", nullable=False
+        default=None,
+        foreign_key="identity.id",
+        ondelete="CASCADE",
+        nullable=False,
+        index=True,
     )
 
     attribute: str
@@ -742,6 +748,22 @@ class StepRow(BaseRow, table=True):
             "stage_id1", "stage_id2", "stage_id_ts", name="unq_step_stages"
         ),
         CheckConstraint("stage_id1 < stage_id2", name="chk_stage_order"),
+        # `unq_step_stages` doesn't catch duplicate barrierless steps (stage_id_ts
+        # NULL), since SQL never treats NULL as equal to itself in a unique
+        # constraint. This expression index closes that gap at the DB level,
+        # defense-in-depth alongside `StepRow.query`'s app-level lookup.
+        Index(
+            "unq_step_stages_null_safe",
+            "stage_id1",
+            "stage_id2",
+            text("coalesce(stage_id_ts, 0)"),
+            unique=True,
+        ),
+        # `stage_id1` is already covered as the leading column of the two indexes
+        # above, but is indexed explicitly here too for symmetry/clarity.
+        Index("ix_step_stage_id1", "stage_id1"),
+        Index("ix_step_stage_id2", "stage_id2"),
+        Index("ix_step_stage_id_ts", "stage_id_ts"),
     )
 
     stage_id1: int | None = Field(
@@ -829,6 +851,17 @@ class ModelRow(BaseRow, table=True):
             "basis",
             name="unique_model",
         ),
+        # `unique_model` doesn't catch duplicates when `program_version` or `basis`
+        # is NULL (see `find_or_create` below). This expression index closes that
+        # gap at the DB level, defense-in-depth alongside the app-level lookup.
+        Index(
+            "unique_model_null_safe",
+            "program",
+            text("coalesce(program_version, '')"),
+            "method",
+            text("coalesce(basis, '')"),
+            unique=True,
+        ),
     )
 
     program: str
@@ -884,6 +917,10 @@ class CalculationRow(BaseRow, table=True):
         Foreign key to the model used for this calculation.
     calc_type
         Type of calculation performed.
+    status
+        Lifecycle status of this calculation.
+    error_message
+        Error message recorded for a failed calculation, if any.
     input_provenance
         Metadata describing how the input was generated.
     output_provenance
@@ -906,6 +943,13 @@ class CalculationRow(BaseRow, table=True):
     calc_type: CalcType = Field(
         sa_column=Column(Enum(CalcType, values_callable=lambda x: [e.value for e in x]))
     )
+    status: CalcStatus = Field(
+        default=CalcStatus.PENDING,
+        sa_column=Column(
+            Enum(CalcStatus, values_callable=lambda x: [e.value for e in x])
+        ),
+    )
+    error_message: str | None = Field(default=None)
     # Intentionally unbounded free-form JSON; add a size/schema guardrail if
     # these are ever populated from a less-trusted input path.
     input_provenance: dict[str, Any] | None = Field(
@@ -941,9 +985,7 @@ class ValidationRow(BaseRow, table=True):
 
     __tablename__ = "validation"
 
-    calculation_id: int | None = Field(
-        default=None, foreign_key="calculation.id", ondelete="CASCADE"
-    )
+    calculation_id: int | None = _fk_field("calculation.id")
 
     method: str
     # Intentionally unbounded free-form JSON; add a size/schema guardrail if

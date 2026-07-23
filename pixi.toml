@@ -38,6 +38,7 @@ rattler-build = "*"
 tbump = "*"
 ipykernel = "*"
 h5py = ">=3.16.0,<4"
+alembic = ">=1.18.5,<2"
 
 [feature.dev.pypi-dependencies]
 keepachangelog = "*"
@@ -68,6 +69,8 @@ lint = "ruff check . --fix"
 types = "ty check"
 imports = "lint-imports"
 test = "pytest"
+# Apply database migrations (set AUTOSTORAGE_DATABASE_URL to target a specific DB)
+migrate = "alembic upgrade head"
 # Run pre-commit hooks (see lefthook.yaml)
 pre-commit = "lefthook run pre-commit --all-files"
 local-pre-commit = "lefthook run local-pre-commit --all-files"

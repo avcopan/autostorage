@@ -1,15 +1,21 @@
 """Autostorage models tests."""
 
+import time
+
 import numpy as np
 import pytest
 from automol import Algorithm, Identity
 from numpy.random import Generator
 from scipy.spatial.transform import Rotation
+from sqlalchemy.exc import IntegrityError
 
 from autostorage import (
+    CalcStatus,
+    CalcType,
     CalculationGeometryLink,
     CalculationRow,
     Database,
+    EnergyRow,
     GeometryRow,
     GradientRow,
     HessianRow,
@@ -17,6 +23,7 @@ from autostorage import (
     StageRow,
     StationaryPointRow,
     StepRow,
+    ValidationRow,
 )
 from autostorage.exc import MissingPrimaryKeyError, ResultShapeError
 from autostorage.types import Role
@@ -43,6 +50,36 @@ def test__link_create_rejects_unmatched_row(
         CalculationGeometryLink.create(calculation_row, model_row, role=Role.INPUT)
 
 
+def test__row_timestamps_set_on_create(database: Database) -> None:
+    """Test that created_at/updated_at are populated by the database on insert."""
+    row = ModelRow(program="orca", method="xtb")
+    database.add(row)
+    database.commit()
+
+    assert row.created_at is not None
+    assert row.updated_at is not None
+
+
+def test__row_updated_at_advances_on_update(database: Database) -> None:
+    """Test that updated_at advances on a later commit while created_at doesn't."""
+    row = ModelRow(program="orca", method="xtb")
+    database.add(row)
+    database.commit()
+    created_at, updated_at = row.created_at, row.updated_at
+    assert created_at is not None
+    assert updated_at is not None
+
+    # SQLite's CURRENT_TIMESTAMP has one-second resolution.
+    time.sleep(1.1)
+    row.basis = "def2-svp"
+    database.add(row)
+    database.commit()
+
+    assert row.updated_at is not None
+    assert row.created_at == created_at
+    assert row.updated_at > updated_at
+
+
 def test__model_find_or_create_reuses_matching_row(database: Database) -> None:
     """Test that find_or_create returns the same row for repeated calls."""
     first = ModelRow.find_or_create(database, program="orca", method="xtb")
@@ -60,6 +97,54 @@ def test__model_find_or_create_distinguishes_basis(database: Database) -> None:
     )
 
     assert no_basis.id != with_basis.id
+
+
+def test__model_null_safe_index_catches_duplicate(database: Database) -> None:
+    """Test that a direct duplicate insert (bypassing find_or_create) is rejected.
+
+    `unique_model` alone doesn't catch this, since SQL treats NULL as distinct
+    from itself; `unique_model_null_safe` is the defense-in-depth index that does.
+    """
+    database.add(ModelRow(program="orca", method="xtb"))
+    database.add(ModelRow(program="orca", method="xtb"))
+
+    with pytest.raises(IntegrityError):
+        database.commit()
+
+
+def test__calculation_default_status_is_pending(model_row: ModelRow) -> None:
+    """Test that a bare CalculationRow defaults to PENDING with no error message."""
+    calculation = CalculationRow(model=model_row, calc_type=CalcType.UNDEFINED)
+
+    assert calculation.status == CalcStatus.PENDING
+    assert calculation.error_message is None
+
+
+def test__calculation_status_transitions(
+    database: Database, model_row: ModelRow
+) -> None:
+    """Test that status/error_message round-trip through the database."""
+    calculation = CalculationRow(
+        model=model_row,
+        calc_type=CalcType.UNDEFINED,
+        status=CalcStatus.FAILED,
+        error_message="boom",
+    )
+    database.add(calculation)
+    database.commit()
+    assert calculation.id is not None
+
+    fetched = database.get(CalculationRow, calculation.id)
+    assert fetched.status == CalcStatus.FAILED
+    assert fetched.error_message == "boom"
+
+
+def test__validation_requires_calculation(database: Database) -> None:
+    """Test that a ValidationRow without a calculation is rejected."""
+    database.add(ValidationRow(method="irc"))
+
+    with pytest.raises(IntegrityError):
+        database.commit()
 
 
 def test__gradient_shape(
@@ -156,6 +241,34 @@ def test__result_query(
     hess2 = HessianRow.query(database, geo=geometry_row, model=calculation_row.model)
     assert hess2
     assert hess2.id == hess.id
+
+
+def test__provenance_query_matches_regardless_of_dict_key_order(
+    database: Database, geometry_row: GeometryRow, model_row: ModelRow
+) -> None:
+    """Test that provenance-filtered queries ignore dict key insertion order.
+
+    SQLite JSON columns compare by exact serialized text, so two dicts built with
+    different key insertion order would previously fail to match even though
+    they're equal in Python; `Database`'s `json_serializer` canonicalizes key
+    order on write to fix this.
+    """
+    calculation = CalculationRow(
+        model=model_row, calc_type=CalcType.ENERGY, input_provenance={"b": 1, "a": 2}
+    )
+    database.add(calculation)
+    database.add(geometry_row)
+    database.commit()
+
+    energy = EnergyRow(calculation=calculation, geometry=geometry_row, value=-1.0)
+    database.add(energy)
+    database.commit()
+
+    found = EnergyRow.query(
+        database, geo=geometry_row, model=model_row, prov={"a": 2, "b": 1}
+    )
+    assert found
+    assert found.id == energy.id
 
 
 def test__stationary_inchi(
@@ -290,6 +403,38 @@ def test__stage_and_step_query(
     step_match = StepRow.query(database, stage1, stage2)
     assert step_match
     assert step_match.id == step.id
+
+
+def test__step_null_safe_index_catches_barrierless_duplicate(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that a direct duplicate barrierless step (bypassing StepRow.query) fails.
+
+    `unq_step_stages` alone doesn't catch this, since `stage_id_ts` is NULL for
+    both rows and SQL treats NULL as distinct from itself; `unq_step_stages_null_safe`
+    is the defense-in-depth index that does.
+    """
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    stage1 = StageRow(stationaries=[stationary1])
+    stage2 = StageRow(stationaries=[stationary2])
+    database.add(stage1)
+    database.add(stage2)
+    database.commit()
+
+    database.add(StepRow(stage1=stage1, stage2=stage2))
+    database.add(StepRow(stage1=stage1, stage2=stage2))
+
+    with pytest.raises(IntegrityError):
+        database.commit()
 
 
 def _hooh_geometry_row(dihedral_deg: float) -> GeometryRow:
