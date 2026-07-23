@@ -80,6 +80,23 @@ def verify_hessian_shape(
         raise ResultShapeError(target, actual, expected)
 
 
+@event.listens_for(HessianRow, "before_update")
+def invalidate_hessian_frequency_cache(
+    mapper: Mapper,  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: HessianRow,
+) -> None:
+    """Drop a cached `harmonic_frequencies` if `value` changed.
+
+    `HessianRow.harmonic_frequencies` is a `functools.cached_property`; an
+    in-place update to `value` after it's already been read once would
+    otherwise keep returning the stale, pre-update frequencies (and
+    `.order`) for the rest of this Python object's lifetime.
+    """
+    if get_history(target, "value").added:
+        target.__dict__.pop("harmonic_frequencies", None)
+
+
 def _recompute_geometry_stationary_validity(
     geometry: GeometryRow, *, excluding: Iterable[HessianRow] = ()
 ) -> None:
@@ -192,12 +209,15 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
     for obj in session.new:
         if not isinstance(obj, StationaryPointRow):
             continue
+        geometry = _resolve_geometry(obj)
+        if geometry is None:
+            continue
         try:
             inchi = IdentityRow.from_geometry(
-                geo=obj.geometry,
+                geo=geometry,
                 algorithm=Algorithm.RDKIT_INCHI,
             )
-            pending_items.append((obj, inchi))
+            pending_items.append((obj, inchi, geometry))
             inchi_lookups.append((inchi.algorithm, inchi.value))
         except ValueError:
             continue
@@ -212,7 +232,7 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 
     identity_map = {(r.algorithm, r.value): r for r in existing_rows}
 
-    for obj, inchi in pending_items:
+    for obj, inchi, geometry in pending_items:
         lookup_key = (inchi.algorithm, inchi.value)
         existing = identity_map.get(lookup_key)
 
@@ -225,7 +245,7 @@ def add_inchi_identities(session: Session, flush_context: Any, instances: Any) -
 
         try:
             smiles = IdentityRow.from_geometry(
-                obj.geometry, algorithm=Algorithm.RDKIT_SMILES
+                geometry, algorithm=Algorithm.RDKIT_SMILES
             )
             smiles_extra = IdentityExtraRow(
                 identity=inchi, attribute="smiles", value=smiles.value
@@ -245,7 +265,11 @@ def _matching_conformer_identity(
     if not peers:
         return None
 
-    matches = geom.is_duplicate_conformer(obj.geometry, [c.geometry for c in peers])
+    geometry = _resolve_geometry(obj)
+    if geometry is None:
+        return None
+
+    matches = geom.is_duplicate_conformer(geometry, [c.geometry for c in peers])
     match_idx = next((i for i, m in enumerate(matches) if m), None)
     if match_idx is None:
         return None

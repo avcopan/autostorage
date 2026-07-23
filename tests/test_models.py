@@ -1,12 +1,14 @@
 """Autostorage models tests."""
 
 import time
+from unittest import mock
 
 import numpy as np
 import pytest
 from automol import Algorithm, Identity
 from numpy.random import Generator
 from scipy.spatial.transform import Rotation
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 
 from autostorage import (
@@ -50,6 +52,32 @@ def test__link_create_rejects_unmatched_row(
     """Test that link.create() raises when a row has no matching relationship."""
     with pytest.raises(ValueError, match="no unmatched relationship"):
         CalculationGeometryLink.create(calculation_row, model_row, role=Role.INPUT)
+
+
+def test__link_create_rejects_ambiguous_row_type(
+    calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that link.create() raises when 2+ unfilled relationships share a type.
+
+    No current `BaseLink` subclass has two relationships to the same row
+    type, so this patches `sa_inspect` to simulate one, guarding the
+    ambiguity check against silently picking a relationship by declaration
+    order if such a link table is ever added.
+    """
+    real_relationships = list(sa_inspect(CalculationGeometryLink).relationships)
+    duplicate_geometry_rel = next(
+        rel for rel in real_relationships if rel.key == "geometry"
+    )
+
+    with mock.patch("autostorage.models.sa_inspect") as mock_inspect:
+        mock_inspect.return_value.relationships = [
+            *real_relationships,
+            duplicate_geometry_rel,
+        ]
+        with pytest.raises(ValueError, match="multiple unmatched relationships"):
+            CalculationGeometryLink.create(
+                geometry_row, calculation_row, role=Role.INPUT
+            )
 
 
 def test__row_timestamps_set_on_create(database: Database) -> None:
@@ -317,6 +345,43 @@ def test__hessian_properties(
     assert hessian.order
 
 
+def test__hessian_frequency_cache_invalidated_on_value_update(
+    database: Database,
+    calculation_row: CalculationRow,
+    geometry_row: GeometryRow,
+    calc_geo_link: CalculationGeometryLink,
+    rng: Generator,
+) -> None:
+    """Test that updating `value` invalidates the cached harmonic frequencies.
+
+    `harmonic_frequencies` is a `functools.cached_property`; `Session.commit()`
+    doesn't clear cached-property entries (only mapped attributes), so this
+    guards against `invalidate_hessian_frequency_cache` regressing and leaving
+    stale frequencies/order behind after an in-place `value` update.
+    """
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.add(calc_geo_link)
+
+    n = geometry_row.atom_count
+    hessian = HessianRow(
+        calculation=calculation_row,
+        geometry=geometry_row,
+        value=rng.uniform(size=(3 * n, 3 * n)),
+    )
+    database.add(hessian)
+    database.commit()
+
+    original_frequencies = hessian.harmonic_frequencies
+    assert "harmonic_frequencies" in hessian.__dict__
+
+    hessian.value = rng.uniform(size=(3 * n, 3 * n))
+    database.add(hessian)
+    database.commit()
+
+    assert hessian.harmonic_frequencies != original_frequencies
+
+
 def test__result_query(
     database: Database,
     calculation_row: CalculationRow,
@@ -387,6 +452,30 @@ def test__stationary_inchi(
     database.commit()
 
     assert stationary.identities[0].value == "InChI=1S/H2O/h1H2"
+
+
+def test__stationary_inchi_resolves_unattached_geometry_id(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test InChI/conformer identities attach when only `geometry_id` is set.
+
+    Regression test: `add_inchi_identities`/`assign_conformer_ids` must
+    resolve the geometry via the session (like the shape/order validators
+    do), rather than reading the `.geometry` relationship directly, which
+    stays unpopulated until the ORM syncs it.
+    """
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.flush()
+
+    stationary = StationaryPointRow(
+        calculation_id=calculation_row.id, geometry_id=geometry_row.id, order=0
+    )
+    database.add(stationary)
+    database.commit()
+
+    assert stationary.identities[0].value == "InChI=1S/H2O/h1H2"
+    assert stationary.identity(algorithm=Algorithm.IRMSD) is not None
 
 
 def test__stationary_identity_matches_by_kind_and_algorithm(

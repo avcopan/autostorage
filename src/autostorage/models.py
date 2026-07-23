@@ -1,6 +1,7 @@
 """Autostorage models."""
 
 from datetime import datetime
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Self, dataclass_transform
 
 import numpy as np
@@ -126,18 +127,25 @@ class BaseLink(SQLModel):
         relationships = sa_inspect(cls, raiseerr=True).relationships
         fields: dict[str, BaseRow] = {}
         for row in rows:
-            match = next(
-                (
-                    rel.key
-                    for rel in relationships
-                    if rel.key not in fields and isinstance(row, rel.mapper.class_)
-                ),
-                None,
-            )
-            if match is None:
+            matches = [
+                rel.key
+                for rel in relationships
+                if rel.key not in fields and isinstance(row, rel.mapper.class_)
+            ]
+            if not matches:
                 msg = f"{cls.__name__} has no unmatched relationship for {row!r}."
                 raise ValueError(msg)
-            fields[match] = row
+            if len(matches) > 1:
+                # Ambiguous: two+ unfilled relationships share this row's type,
+                # so matching by type alone can't tell them apart (e.g. a link
+                # table with two relationships to the same row model). Raise
+                # rather than silently picking one by declaration order.
+                msg = (
+                    f"{cls.__name__} has multiple unmatched relationships "
+                    f"{matches} for {row!r}; construct this link directly instead."
+                )
+                raise ValueError(msg)
+            fields[matches[0]] = row
         return cls(**fields, **attrs)
 
 
@@ -264,9 +272,16 @@ class HessianRow(BaseResultRow, table=True):
     calculation: "CalculationRow" = Relationship()
     geometry: "GeometryRow" = Relationship(back_populates="hessians")
 
-    @property
+    @cached_property
     def harmonic_frequencies(self) -> tuple[float, ...]:
-        """Harmonic frequencies derived from the Hessian."""
+        """Harmonic frequencies derived from the Hessian.
+
+        Cached per instance, since vibrational analysis re-diagonalizes the
+        Hessian on every call and `.order` (used by `_recompute_geometry_
+        stationary_validity` for every sibling Hessian of a geometry, on
+        every relevant flush) depends on it. Invalidated on `value` update
+        by `invalidate_hessian_frequency_cache` in `events.py`.
+        """
         freqs, _ = geom.vibrational_analysis(geo=self.geometry, hess=self.value)
         return freqs
 
