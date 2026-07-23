@@ -1,7 +1,7 @@
 """Database connection."""
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
@@ -9,6 +9,7 @@ from types import TracebackType
 from typing import Self
 
 from sqlalchemy import event
+from sqlalchemy import select as sa_select
 from sqlalchemy.exc import MultipleResultsFound, NoResultFound, OperationalError
 from sqlmodel import Session, SQLModel, create_engine
 from sqlmodel.sql.expression import Select, SelectOfScalar
@@ -115,6 +116,16 @@ class Database:
         with self.session() as session:
             session.add(row)
 
+    def add_all[RowT: SQLModel](self, rows: Iterable[RowT]) -> None:
+        """Add multiple rows to session.
+
+        Note
+        ----
+        Bulk counterpart to `add()`; the same staging-only caveat applies.
+        """
+        with self.session() as session:
+            session.add_all(rows)
+
     def merge[RowT: SQLModel](self, row: RowT) -> RowT:
         """Merge row into current session and commit, returning the merged row."""
         with self.session() as session:
@@ -148,12 +159,18 @@ class Database:
             session.delete(row)
             session.commit()
 
+    def get_or_none[RowT: SQLModel](
+        self, model: type[RowT], row_id: int
+    ) -> RowT | None:
+        """Get row from database, returning `None` instead of raising on a miss."""
+        with self.session() as session:
+            return session.get(model, row_id)
+
     def get[RowT: SQLModel](self, model: type[RowT], row_id: int) -> RowT:
         """Get row from database."""
-        with self.session() as session:
-            row = session.get(model, row_id)
-            if row is not None:
-                return row
+        row = self.get_or_none(model, row_id)
+        if row is not None:
+            return row
 
         msg = f"{model} with {row_id = } not found."
         raise LookupError(msg)
@@ -179,6 +196,17 @@ class Database:
         """Return all matches to a statement."""
         with self.session() as session:
             return list(session.exec(stmt).all())
+
+    def exists[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> bool:
+        """Return whether any row matches a statement.
+
+        Executes as a single `EXISTS` subquery instead of `exec_first`, so a
+        matching row is never materialized just to check for its presence.
+        """
+        with self.session() as session:
+            return bool(
+                session.exec(sa_select(stmt.exists())).scalar()  # ty:ignore[no-matching-overload]
+            )
 
     def close(self) -> None:
         """Close the database connection."""

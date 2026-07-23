@@ -54,6 +54,28 @@ def test__invalid_get(database: Database) -> None:
         database.get(ModelRow, 679)
 
 
+def test__get_or_none_returns_row_or_none(
+    database: Database, model_row: ModelRow
+) -> None:
+    """Test get_or_none returns the row on a hit and None on a miss."""
+    database.add(model_row)
+    database.commit()
+    assert model_row.id
+
+    assert database.get_or_none(ModelRow, model_row.id) == model_row
+    assert database.get_or_none(ModelRow, 679) is None
+
+
+def test__add_all(database: Database) -> None:
+    """Test add_all stages multiple rows for the next flush/commit."""
+    rows = [ModelRow(program="orca", method="xtb", basis=f"basis{i}") for i in range(3)]
+    database.add_all(rows)
+    database.commit()
+
+    assert all(row.id is not None for row in rows)
+    assert len({row.id for row in rows}) == len(rows)
+
+
 def test__delete(database: Database, model_row: ModelRow) -> None:
     """Test delete from database."""
     database.add(model_row)
@@ -107,6 +129,18 @@ def test__exec_all(
     database.add(model_row)
     for match in database.exec_all(orca_model_statement):
         assert match
+
+
+def test__exists_true_and_false(
+    database: Database, model_row: ModelRow, orca_model_statement: SelectStatement
+) -> None:
+    """Test exists() returns True for a match and False otherwise."""
+    database.add(model_row)
+    database.commit()
+
+    assert database.exists(orca_model_statement) is True
+    missing_stmt = select(ModelRow).where(ModelRow.program == "nonexistent")
+    assert database.exists(missing_stmt) is False
 
 
 def test__select_statement_chaining(database: Database, model_row: ModelRow) -> None:

@@ -607,6 +607,27 @@ class StationaryPointRow(BaseRow, table=True):
 
         return db.exec_first(stmt)
 
+    def identity(
+        self,
+        *,
+        kind: str | None = None,
+        algorithm: Any | None = None,  # noqa: ANN401
+    ) -> "IdentityRow | None":
+        """Return the first loaded identity matching kind and/or algorithm.
+
+        Searches `self.identities` (the already-loaded relationship list),
+        not the database — use `StationaryPointRow.query` for a DB lookup.
+        """
+        return next(
+            (
+                i
+                for i in self.identities
+                if (kind is None or i.kind == kind)
+                and (algorithm is None or i.algorithm == algorithm)
+            ),
+            None,
+        )
+
 
 class IdentityRow(BaseRow, Identity, table=True):
     """A chemical identifier associated with one or more stationary points.
@@ -730,6 +751,31 @@ class StageRow(BaseRow, table=True):
         )
         return db.exec_first(stmt)
 
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        stationaries: list["StationaryPointRow"],
+        *,
+        is_ts: bool = False,
+    ) -> Self:
+        """Return the matching stage row, creating and saving one if absent.
+
+        Note
+        ----
+        Unlike `ModelRow`/`StepRow`, there is no DB-level uniqueness
+        constraint backing this dedup, so it relies entirely on
+        `StageRow.query`'s app-level lookup.
+        """
+        existing = cls.query(db, stationaries, is_ts=is_ts)
+        if existing is not None:
+            return existing
+
+        row = cls(stationaries=stationaries, is_ts=is_ts)
+        db.add(row)
+        db.commit()
+        return row
+
 
 class StepRow(BaseRow, table=True):
     """An elementary reaction step connecting a reactant, transition state, and product.
@@ -824,6 +870,24 @@ class StepRow(BaseRow, table=True):
             cls.stage_id_ts == ts_id,
         )
         return db.exec_first(stmt)
+
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        stage1: "StageRow",
+        stage2: "StageRow",
+        stage_ts: "StageRow | None" = None,
+    ) -> Self:
+        """Return the matching step row, creating and saving one if absent."""
+        existing = cls.query(db, stage1, stage2, stage_ts)
+        if existing is not None:
+            return existing
+
+        row = cls(stage1=stage1, stage2=stage2, stage_ts=stage_ts)
+        db.add(row)
+        db.commit()
+        return row
 
 
 # Calculation rows
@@ -966,6 +1030,36 @@ class CalculationRow(BaseRow, table=True):
     trajectory_links: list["CalculationTrajectoryLink"] = Relationship(
         back_populates="calculation"
     )
+
+    @property
+    def input_geometries(self) -> list["GeometryRow"]:
+        """Geometries linked to this calculation with an INPUT role."""
+        return [
+            link.geometry for link in self.geometry_links if link.role == Role.INPUT
+        ]
+
+    @property
+    def output_geometries(self) -> list["GeometryRow"]:
+        """Geometries linked to this calculation with an OUTPUT role."""
+        return [
+            link.geometry for link in self.geometry_links if link.role == Role.OUTPUT
+        ]
+
+    @property
+    def input_trajectories(self) -> list["TrajectoryRow"]:
+        """Trajectories linked to this calculation with an INPUT role."""
+        return [
+            link.trajectory for link in self.trajectory_links if link.role == Role.INPUT
+        ]
+
+    @property
+    def output_trajectories(self) -> list["TrajectoryRow"]:
+        """Trajectories linked to this calculation with an OUTPUT role."""
+        return [
+            link.trajectory
+            for link in self.trajectory_links
+            if link.role == Role.OUTPUT
+        ]
 
 
 class ValidationRow(BaseRow, table=True):

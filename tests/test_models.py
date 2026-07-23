@@ -23,9 +23,11 @@ from autostorage import (
     StageRow,
     StationaryPointRow,
     StepRow,
+    TrajectoryRow,
     ValidationRow,
 )
 from autostorage.exc import MissingPrimaryKeyError, ResultShapeError
+from autostorage.models import CalculationTrajectoryLink
 from autostorage.types import Role
 
 
@@ -139,6 +141,62 @@ def test__calculation_status_transitions(
     assert fetched.error_message == "boom"
 
 
+def test__calculation_geometry_role_properties(
+    database: Database,
+    calculation_row: CalculationRow,
+    geometry_row: GeometryRow,
+    calc_geo_link: CalculationGeometryLink,
+) -> None:
+    """Test that input_geometries/output_geometries filter links by role."""
+    output_geometry = GeometryRow(
+        symbols=["H", "O", "H"],
+        coordinates=np.array([[0, 0, 0.8], [0, 0, 0], [0.8, 0, 0]]),
+        charge=0,
+        spin=0,
+    )
+    output_link = CalculationGeometryLink.create(
+        calculation_row, output_geometry, role=Role.OUTPUT
+    )
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.add(calc_geo_link)
+    database.add(output_geometry)
+    database.add(output_link)
+    database.commit()
+
+    assert calculation_row.input_geometries == [geometry_row]
+    assert calculation_row.output_geometries == [output_geometry]
+
+
+def test__calculation_trajectory_role_properties(
+    database: Database, calculation_row: CalculationRow
+) -> None:
+    """Test that input_trajectories/output_trajectories filter links by role."""
+    # Committed one at a time: TrajectoryRow has no non-base columns, and
+    # SQLite's batched multi-row insert can't apply the created_at
+    # server_default to two such rows in a single flush.
+    input_trajectory = TrajectoryRow()
+    database.add(input_trajectory)
+    database.commit()
+    output_trajectory = TrajectoryRow()
+    database.add(output_trajectory)
+    database.commit()
+
+    input_link = CalculationTrajectoryLink.create(
+        calculation_row, input_trajectory, role=Role.INPUT
+    )
+    output_link = CalculationTrajectoryLink.create(
+        calculation_row, output_trajectory, role=Role.OUTPUT
+    )
+    database.add(calculation_row)
+    database.add(input_link)
+    database.add(output_link)
+    database.commit()
+
+    assert calculation_row.input_trajectories == [input_trajectory]
+    assert calculation_row.output_trajectories == [output_trajectory]
+
+
 def test__validation_requires_calculation(database: Database) -> None:
     """Test that a ValidationRow without a calculation is rejected."""
     database.add(ValidationRow(method="irc"))
@@ -191,6 +249,50 @@ def test__hessian_shape(
 
     with pytest.raises(ResultShapeError):
         database.commit()
+
+
+def test__geometry_symbols_immutable_after_insert(
+    database: Database, geometry_row: GeometryRow
+) -> None:
+    """Test that mutating symbols after insert is rejected."""
+    database.add(geometry_row)
+    database.commit()
+
+    geometry_row.symbols = ["H", "O", "O"]
+    database.add(geometry_row)
+    with pytest.raises(ValueError, match="symbols"):
+        database.commit()
+
+
+def test__geometry_coordinates_immutable_after_insert(
+    database: Database, geometry_row: GeometryRow
+) -> None:
+    """Test that mutating coordinates after insert is rejected."""
+    database.add(geometry_row)
+    database.commit()
+
+    geometry_row.coordinates = np.array(geometry_row.coordinates) + 0.1
+    database.add(geometry_row)
+    with pytest.raises(ValueError, match="coordinates"):
+        database.commit()
+
+
+def test__geometry_charge_and_spin_remain_mutable(
+    database: Database, geometry_row: GeometryRow
+) -> None:
+    """Test that charge/spin can still be updated after insert."""
+    database.add(geometry_row)
+    database.commit()
+    assert geometry_row.id
+
+    geometry_row.charge = 1
+    geometry_row.spin = 1
+    database.add(geometry_row)
+    database.commit()
+
+    fetched = database.get(GeometryRow, geometry_row.id)
+    assert fetched.charge == 1
+    assert fetched.spin == 1
 
 
 def test__hessian_properties(
@@ -287,6 +389,32 @@ def test__stationary_inchi(
     assert stationary.identities[0].value == "InChI=1S/H2O/h1H2"
 
 
+def test__stationary_identity_matches_by_kind_and_algorithm(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test identity() lookup by kind, algorithm, both, and no match."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+
+    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary)
+    database.commit()
+
+    inchi = stationary.identity(kind="stereoisomer")
+    assert inchi
+    assert inchi.value == "InChI=1S/H2O/h1H2"
+
+    conformer = stationary.identity(algorithm=Algorithm.IRMSD)
+    assert conformer
+    assert conformer.kind == "conformer"
+
+    assert (
+        stationary.identity(kind="stereoisomer", algorithm=Algorithm.RDKIT_INCHI)
+        is inchi
+    )
+    assert stationary.identity(kind="nonexistent") is None
+
+
 def test__stationary_order_hessian_first(
     database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
 ) -> None:
@@ -341,6 +469,66 @@ def test__stationary_order_hessian_second(
 
     database.commit()
     assert not stationary.is_valid
+
+
+def test__hessian_delete_leaves_is_valid_correct_with_remaining_hessian(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that deleting one of two agreeing Hessians keeps is_valid correct."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    n = geometry_row.atom_count
+    hessian1 = HessianRow(
+        calculation=calculation_row,
+        geometry=geometry_row,
+        value=np.zeros((3 * n, 3 * n)),
+    )
+    hessian2 = HessianRow(
+        calculation=calculation_row,
+        geometry=geometry_row,
+        value=np.zeros((3 * n, 3 * n)),
+    )
+    database.add(hessian1)
+    database.add(hessian2)
+
+    stationary = StationaryPointRow(
+        calculation=calculation_row, geometry=geometry_row, order=0
+    )
+    database.add(stationary)
+    database.commit()
+    assert stationary.is_valid
+
+    database.delete(hessian1)
+    assert stationary.is_valid
+
+
+def test__hessian_delete_leaves_is_valid_untouched_when_no_hessians_remain(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that deleting the last Hessian doesn't reset is_valid to False."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    n = geometry_row.atom_count
+    hessian = HessianRow(
+        calculation=calculation_row,
+        geometry=geometry_row,
+        value=np.zeros((3 * n, 3 * n)),
+    )
+    database.add(hessian)
+
+    stationary = StationaryPointRow(
+        calculation=calculation_row, geometry=geometry_row, order=0
+    )
+    database.add(stationary)
+    database.commit()
+    assert stationary.is_valid
+
+    database.delete(hessian)
+    assert stationary.is_valid
 
 
 def test__stationary_query(
@@ -405,6 +593,70 @@ def test__stage_and_step_query(
     assert step_match.id == step.id
 
 
+def test__stage_find_or_create_reuses_matching_row(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that find_or_create returns the same row for repeated calls."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary)
+    database.commit()
+
+    first = StageRow.find_or_create(database, [stationary])
+    second = StageRow.find_or_create(database, [stationary])
+
+    assert first.id is not None
+    assert first.id == second.id
+
+
+def test__stage_find_or_create_distinguishes_is_ts(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that find_or_create treats differing is_ts as distinct stages."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary)
+    database.commit()
+
+    non_ts = StageRow.find_or_create(database, [stationary], is_ts=False)
+    ts = StageRow.find_or_create(database, [stationary], is_ts=True)
+
+    assert non_ts.id != ts.id
+
+
+def test__step_find_or_create_reuses_matching_row(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that find_or_create returns the same row for repeated calls."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    stage1 = StageRow(stationaries=[stationary1])
+    stage2 = StageRow(stationaries=[stationary2])
+    database.add(stage1)
+    database.add(stage2)
+    database.commit()
+
+    first = StepRow.find_or_create(database, stage1, stage2)
+    second = StepRow.find_or_create(database, stage1, stage2)
+
+    assert first.id is not None
+    assert first.id == second.id
+
+
 def test__step_null_safe_index_catches_barrierless_duplicate(
     database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
 ) -> None:
@@ -435,6 +687,90 @@ def test__step_null_safe_index_catches_barrierless_duplicate(
 
     with pytest.raises(IntegrityError):
         database.commit()
+
+
+def test__step_rejects_ts_stage_as_stage1_or_stage2(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that a TS stage cannot be used as stage1/stage2."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+    database.add(stationary1)
+    database.add(stationary2)
+    database.commit()
+
+    stage_ts = StageRow(stationaries=[stationary1], is_ts=True)
+    stage2 = StageRow(stationaries=[stationary2])
+    database.add(stage_ts)
+    database.add(stage2)
+    database.commit()
+
+    database.add(StepRow(stage1=stage_ts, stage2=stage2))
+    with pytest.raises(ValueError, match="transition-state"):
+        database.commit()
+
+
+def test__step_rejects_non_ts_stage_as_stage_ts(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that a non-TS stage cannot be used as stage_ts."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationaries = [
+        StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+        for _ in range(3)
+    ]
+    for stationary in stationaries:
+        database.add(stationary)
+    database.commit()
+
+    stage1, stage2, stage3 = (StageRow(stationaries=[s]) for s in stationaries)
+    database.add(stage1)
+    database.add(stage2)
+    database.add(stage3)
+    database.commit()
+
+    database.add(StepRow(stage1=stage1, stage2=stage2, stage_ts=stage3))
+    with pytest.raises(ValueError, match="stage_ts"):
+        database.commit()
+
+
+def test__step_accepts_consistent_ts_configuration(
+    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
+) -> None:
+    """Test that a step with a genuine TS stage commits without error."""
+    database.add(calculation_row)
+    database.add(geometry_row)
+    database.commit()
+
+    stationaries = [
+        StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
+        for _ in range(3)
+    ]
+    for stationary in stationaries:
+        database.add(stationary)
+    database.commit()
+
+    stage1 = StageRow(stationaries=[stationaries[0]])
+    stage2 = StageRow(stationaries=[stationaries[1]])
+    stage_ts = StageRow(stationaries=[stationaries[2]], is_ts=True)
+    database.add(stage1)
+    database.add(stage2)
+    database.add(stage_ts)
+    database.commit()
+
+    step = StepRow(stage1=stage1, stage2=stage2, stage_ts=stage_ts)
+    database.add(step)
+    database.commit()
+
+    assert step.id is not None
+    assert not step.is_barrierless
 
 
 def _hooh_geometry_row(dihedral_deg: float) -> GeometryRow:
