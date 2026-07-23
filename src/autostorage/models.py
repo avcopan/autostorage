@@ -831,6 +831,41 @@ class ModelRow(BaseRow, table=True):
     method: str
     basis: str | None = None
 
+    @classmethod
+    def find_or_create(
+        cls,
+        db: "Database",
+        *,
+        program: str,
+        method: str,
+        program_version: str | None = None,
+        basis: str | None = None,
+    ) -> Self:
+        """Return the matching model row, creating and saving one if absent.
+
+        ``unique_model`` doesn't catch duplicates when ``program_version``
+        or ``basis`` is NULL, since SQL treats NULL as distinct from itself
+        in unique constraints. Callers that don't always supply both should
+        use this instead of constructing and saving a ``ModelRow`` directly,
+        to avoid silently accumulating duplicate rows for the same model.
+        """
+        stmt = select(cls).where(
+            cls.program == program,
+            cls.program_version == program_version,
+            cls.method == method,
+            cls.basis == basis,
+        )
+        existing = db.exec_first(stmt)
+        if existing is not None:
+            return existing
+
+        return cls(
+            program=program,
+            program_version=program_version,
+            method=method,
+            basis=basis,
+        ).save(db)
+
 
 class CalculationRow(BaseRow, table=True):
     """Quantum chemistry calculation and its associated data.

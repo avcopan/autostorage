@@ -13,11 +13,31 @@ from autostorage import (
     GeometryRow,
     GradientRow,
     HessianRow,
+    ModelRow,
     StageRow,
     StationaryPointRow,
     StepRow,
 )
 from autostorage.exc import MissingPrimaryKeyError, ResultShapeError
+
+
+def test__model_find_or_create_reuses_matching_row(database: Database) -> None:
+    """Test that find_or_create returns the same row for repeated calls."""
+    first = ModelRow.find_or_create(database, program="orca", method="xtb")
+    second = ModelRow.find_or_create(database, program="orca", method="xtb")
+
+    assert first.id is not None
+    assert first.id == second.id
+
+
+def test__model_find_or_create_distinguishes_basis(database: Database) -> None:
+    """Test that find_or_create treats a differing basis as a distinct model."""
+    no_basis = ModelRow.find_or_create(database, program="orca", method="xtb")
+    with_basis = ModelRow.find_or_create(
+        database, program="orca", method="xtb", basis="def2-svp"
+    )
+
+    assert no_basis.id != with_basis.id
 
 
 def test__gradient_shape(
