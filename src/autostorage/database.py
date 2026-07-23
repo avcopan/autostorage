@@ -8,6 +8,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+import click
 from sqlalchemy import event
 from sqlalchemy import select as sa_select
 from sqlalchemy.exc import MultipleResultsFound, NoResultFound
@@ -16,7 +17,8 @@ from sqlmodel.sql.expression import Select, SelectOfScalar
 
 # Ensure all modules are loaded with the database
 from .events import *  # noqa: F403
-from .merge import MergeReport, merge_databases
+from .merge import MergeReport
+from .merge import merge_databases as _merge_databases
 from .models import *  # noqa: F403
 
 type SelectStatement[T] = Select[T] | SelectOfScalar[T]
@@ -99,10 +101,9 @@ class Database:
 
         Note
         ----
-        This only stages the row; it is not validated or written to the
-        database until the next `flush()` or `commit()`. Integrity/shape
-        errors (unique constraints, the shape event listeners) raise there,
-        which may be far removed from this call.
+        The row is not validated or written to the database until the next `flush()` or
+        `commit()`. Integrity/shape errors (unique constraints, the shape event
+        listeners) raise there, which may be far removed from this call.
         """
         with self.session() as session:
             session.add(row)
@@ -112,7 +113,7 @@ class Database:
 
         Note
         ----
-        Bulk counterpart to `add()`; the same staging-only caveat applies.
+        Bulk `add()`. Same staging-only caveat applies.
         """
         with self.session() as session:
             session.add_all(rows)
@@ -135,7 +136,7 @@ class Database:
         --------
         autostorage.merge
         """
-        return merge_databases(target=self, source=source_db, commit=commit)
+        return _merge_databases(target=self, source=source_db, commit=commit)
 
     def flush(self) -> None:
         """Flush pending changes to the database without committing.
@@ -231,3 +232,24 @@ class Database:
         if exc_type is not None:
             self._session.rollback()
         self.close()
+
+
+@click.command(name="autostorage-merge")
+@click.argument("target", type=click.Path(path_type=Path))
+@click.argument("source", type=click.Path(path_type=Path))
+def merge_databases(target: Path, source: Path) -> None:
+    """Merge one on-disk database's contents into another, as a CLI command.
+
+    Installed as the ``autostorage-merge`` console script (see
+    ``[project.scripts]`` in ``pyproject.toml``); also runnable via
+    ``python -m autostorage.database``.
+    """
+    with Database(target) as target_db, Database(source) as source_db:
+        report = _merge_databases(target=target_db, source=source_db)
+
+    click.echo(f"Copied: {report.copied}")
+    click.echo(f"Reused: {report.reused}")
+
+
+if __name__ == "__main__":
+    merge_databases()
