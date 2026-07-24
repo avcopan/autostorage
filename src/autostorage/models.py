@@ -1,5 +1,7 @@
 """SQLModel row definitions for autostorage's persistence schema."""
 
+import hashlib
+import json
 from datetime import datetime
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Self, dataclass_transform
@@ -152,6 +154,18 @@ class BaseLink(SQLModel):
         return cls(**fields, **attrs)
 
 
+def _geometry_hash(
+    symbols: list[str], coordinates: FloatArray, charge: int, spin: int
+) -> str:
+    """Compute a hash identifying bit-identical geometry content."""
+    hasher = hashlib.sha256()
+    hasher.update(json.dumps(symbols).encode())
+    hasher.update(np.asarray(coordinates, dtype=np.float64).tobytes())
+    hasher.update(charge.to_bytes(8, "big", signed=True))
+    hasher.update(spin.to_bytes(8, "big", signed=True))
+    return hasher.hexdigest()
+
+
 # Geometry table
 class GeometryRow(BaseRow, Geometry, table=True):
     """Molecular geometry definition and metadata.
@@ -166,6 +180,9 @@ class GeometryRow(BaseRow, Geometry, table=True):
         Total molecular charge.
     spin
         Number of unpaired electrons (2S).
+    geometry_hash
+        Content hash of `symbols`/`coordinates`/`charge`/`spin`, used to reject
+        exactly-duplicate geometries (see `find_or_create`).
     energies
         Energy results computed at this geometry.
     gradients
@@ -181,11 +198,13 @@ class GeometryRow(BaseRow, Geometry, table=True):
     """
 
     __tablename__ = "geometry"
+    __table_args__ = (UniqueConstraint("geometry_hash", name="unique_geometry_hash"),)
 
     symbols: list[str] = Field(sa_column=Column(JSON))
     coordinates: FloatArray = Field(sa_column=Column(CompressedArrayTypeDecorator()))
     charge: int
     spin: int
+    geometry_hash: str | None = Field(default=None, nullable=False)
 
     energies: list["EnergyRow"] = Relationship(back_populates="geometry")
     gradients: list["GradientRow"] = Relationship(back_populates="geometry")
@@ -208,6 +227,44 @@ class GeometryRow(BaseRow, Geometry, table=True):
         """
         graph = geom.stereo_mol_graph(self)
         return _stereo_symmetry_number(graph)
+
+    @classmethod
+    def find_or_create(  # noqa: PLR0913
+        cls,
+        db: "Database",
+        *,
+        symbols: list[str],
+        coordinates: FloatArray,
+        charge: int,
+        spin: int,
+        commit: bool = True,
+    ) -> Self:
+        """Return the matching geometry row, creating and saving one if absent.
+
+        Matches on exact content via `geometry_hash`, so this only reuses
+        bit-identical geometries.
+
+        Parameters
+        ----------
+        commit, optional
+            If True (default), commit a newly-created row immediately. If
+            False, only flush it (still assigns `.id`), leaving the caller's
+            transaction open — for a caller staging several dedup lookups
+            that must succeed or fail together.
+        """
+        geometry_hash = _geometry_hash(symbols, coordinates, charge, spin)
+        stmt = select(cls).where(cls.geometry_hash == geometry_hash)
+        existing = db.exec_first(stmt)
+        if existing is not None:
+            return existing
+
+        row = cls(symbols=symbols, coordinates=coordinates, charge=charge, spin=spin)
+        db.add(row)
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+        return row
 
 
 # Result tables
@@ -462,7 +519,7 @@ class StationaryPointRow(BaseRow, table=True):
         Whether this point is not a true stationary point (e.g. constrained).
     is_valid
         Whether `order` agrees with the consensus order of its geometry's
-        Hessians (see `autostorage.events.validate_geometry_orders`).
+        Hessians (see `autostorage.events.revalidate_geometry_orders_on_insert_update`).
     geometry
         Geometry defining the coordinates of this point.
     calculation
