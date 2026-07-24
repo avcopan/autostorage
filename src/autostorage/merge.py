@@ -7,7 +7,13 @@ from sqlalchemy import inspect as sa_inspect
 from sqlmodel import SQLModel, func, select
 
 from .events import AUTO_MANAGED_IDENTITY_ALGORITHMS
-from .models import IdentityExtraRow, IdentityRow, ModelRow, StationaryIdentityLink
+from .models import (
+    GeometryRow,
+    IdentityExtraRow,
+    IdentityRow,
+    ModelRow,
+    StationaryIdentityLink,
+)
 
 if TYPE_CHECKING:
     from .database import Database
@@ -25,7 +31,7 @@ class MergeReport:
         New rows created in the target database, by table name.
     reused
         Source rows deduplicated onto an existing target row, by table name
-        (only ``model`` and ``identity`` support dedup).
+        (only ``model``, ``geometry``, and ``identity`` support dedup).
     """
 
     copied: dict[str, int]
@@ -38,8 +44,9 @@ def merge_databases(
     """Copy `source`'s contents into `target`, validating and deduplicating.
 
     Rows are copied with freshly-assigned primary keys and remapped foreign
-    keys. `ModelRow` and non-auto-managed `IdentityRow`s are deduplicated
-    against `target`'s existing content; everything else is copied fresh.
+    keys. `ModelRow`, `GeometryRow`, and non-auto-managed `IdentityRow`s are
+    deduplicated against `target`'s existing content; everything else is
+    copied fresh.
 
     InChI/conformer identities are deliberately skipped here: inserting each
     source `StationaryPointRow` fresh lets `autostorage.events`'s flush
@@ -75,6 +82,14 @@ def merge_databases(
     for cls in _ordered_models():
         if cls is ModelRow:
             _copy_models(
+                target=target,
+                source=source,
+                id_map=id_map,
+                copied=copied,
+                reused=reused,
+            )
+        elif cls is GeometryRow:
+            _copy_geometries(
                 target=target,
                 source=source,
                 id_map=id_map,
@@ -281,6 +296,38 @@ def _copy_models(
     created = _table_count(target, ModelRow) - before
     copied["model"] = created
     reused["model"] = len(rows) - created
+
+
+def _copy_geometries(
+    *,
+    target: "Database",
+    source: "Database",
+    id_map: dict[type[SQLModel], dict[int, int]],
+    copied: dict[str, int],
+    reused: dict[str, int],
+) -> None:
+    """Find-or-create every source `GeometryRow` against `target`."""
+    rows = source.exec_all(select(GeometryRow))
+    if not rows:
+        return
+
+    before = _table_count(target, GeometryRow)
+    mapping: dict[int, int] = {}
+    for row in rows:
+        new_row = GeometryRow.find_or_create(
+            target,
+            symbols=row.symbols,
+            coordinates=row.coordinates,
+            charge=row.charge,
+            spin=row.spin,
+            commit=False,
+        )
+        mapping[row.id] = new_row.id  # ty:ignore[invalid-assignment]
+
+    id_map[GeometryRow] = mapping
+    created = _table_count(target, GeometryRow) - before
+    copied["geometry"] = created
+    reused["geometry"] = len(rows) - created
 
 
 def _copy_identities(

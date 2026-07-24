@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.command import upgrade
 from alembic.config import Config
@@ -20,6 +21,13 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _NULL_SAFE_EXPRESSION_INDEXES = ("unique_model_null_safe", "unq_step_stages_null_safe")
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Skipped unsupported reflection of expression-based index"
+    ":sqlalchemy.exc.SAWarning"
+)
+@pytest.mark.filterwarnings(
+    "ignore:autogenerate skipping metadata-specified expression-based index:UserWarning"
+)
 def test__migrations_upgrade_to_head_matches_current_models(tmp_path: Path) -> None:
     """Test that running all migrations reproduces the schema `create_all()` builds."""
     db_path = tmp_path / "migrated.db"

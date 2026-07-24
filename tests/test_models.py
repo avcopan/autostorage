@@ -178,7 +178,7 @@ def test__calculation_geometry_role_properties(
     """Test that input_geometries/output_geometries filter links by role."""
     output_geometry = GeometryRow(
         symbols=["H", "O", "H"],
-        coordinates=np.array([[0, 0, 0.8], [0, 0, 0], [0.8, 0, 0]]),
+        coordinates=np.array([[0, 0, 0.9], [0, 0, 0], [0.9, 0, 0]]),
         charge=0,
         spin=0,
     )
@@ -321,6 +321,66 @@ def test__geometry_charge_and_spin_remain_mutable(
     fetched = database.get(GeometryRow, geometry_row.id)
     assert fetched.charge == 1
     assert fetched.spin == 1
+
+
+def test__geometry_find_or_create_reuses_matching_row(
+    database: Database, geometry_row: GeometryRow
+) -> None:
+    """Test that find_or_create returns the same row for repeated calls."""
+    first = GeometryRow.find_or_create(
+        database,
+        symbols=list(geometry_row.symbols),
+        coordinates=np.array(geometry_row.coordinates),
+        charge=geometry_row.charge,
+        spin=geometry_row.spin,
+    )
+    second = GeometryRow.find_or_create(
+        database,
+        symbols=list(geometry_row.symbols),
+        coordinates=np.array(geometry_row.coordinates),
+        charge=geometry_row.charge,
+        spin=geometry_row.spin,
+    )
+
+    assert first.id is not None
+    assert first.id == second.id
+
+
+def test__geometry_unique_hash_catches_direct_duplicate_insert(
+    database: Database, geometry_row: GeometryRow
+) -> None:
+    """Test that a direct duplicate insert (bypassing find_or_create) is rejected."""
+    duplicate = GeometryRow(
+        symbols=list(geometry_row.symbols),
+        coordinates=np.array(geometry_row.coordinates),
+        charge=geometry_row.charge,
+        spin=geometry_row.spin,
+    )
+    database.add(geometry_row)
+    database.add(duplicate)
+
+    with pytest.raises(IntegrityError):
+        database.commit()
+
+
+def test__geometry_near_duplicate_is_not_deduped(
+    database: Database, geometry_row: GeometryRow, rng: Generator
+) -> None:
+    """Test that a rotated/translated/jittered near-duplicate is a distinct row.
+
+    `geometry_hash` only catches bit-identical content; chemically-equivalent
+    but numerically distinct conformers are handled separately (and more
+    coarsely) by `events.py`'s InChI/conformer identity matching.
+    """
+    near_duplicate = _jittered_copy(geometry_row, rng)
+
+    database.add(geometry_row)
+    database.add(near_duplicate)
+    database.commit()
+
+    assert geometry_row.id is not None
+    assert near_duplicate.id is not None
+    assert geometry_row.id != near_duplicate.id
 
 
 def test__hessian_properties(

@@ -161,7 +161,12 @@ def test__multi_tier_fk_remapping(target: Database, source: Database) -> None:
     source.flush()
 
     geometry1 = _water_geometry()
-    geometry2 = _water_geometry()
+    geometry2 = GeometryRow(
+        symbols=["O", "H", "H"],
+        coordinates=np.array([[0.0, 0.0, 0.0], [1.1, 0.0, 0.0], [-0.3, 1.0, 0.0]]),
+        charge=0,
+        spin=0,
+    )
     source.add(geometry1)
     source.add(geometry2)
     source.flush()
@@ -220,6 +225,30 @@ def test__model_dedup_distinguishes_null_basis(
     assert report.reused["model"] == 1
     assert report.copied["model"] == 1
     assert len(target.exec_all(select(ModelRow))) == before + report.copied["model"]
+
+
+# --- GeometryRow dedup --------------------------------------------------------
+
+
+def test__geometry_dedup_reuses_identical_geometry(
+    target: Database, source: Database
+) -> None:
+    """Test that an identical geometry is reused, and dependents resolve to it."""
+    target_geometry = _water_geometry()
+    target.add(target_geometry)
+    target.commit()
+    before = len(target.exec_all(select(GeometryRow)))
+
+    _add_water_stationary(source)
+
+    report = target.merge_from(source)
+
+    assert report.reused["geometry"] == 1
+    assert report.copied["geometry"] == 0
+    assert len(target.exec_all(select(GeometryRow))) == before
+
+    (merged_stationary,) = target.exec_all(select(StationaryPointRow))
+    assert merged_stationary.geometry_id == target_geometry.id
 
 
 # --- Identity/events interaction ---------------------------------------------

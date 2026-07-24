@@ -89,7 +89,6 @@ def test__export_well_bimolecular_barrier_round_trip(
 
     ref = _stationary(database, calculation_row, geometry_row)
     _with_energy(database, calculation_row, geometry_row, -76.0)
-    well_stage = StageRow(stationaries=[ref])
 
     frag1_geo = GeometryRow(
         symbols=["N", "H", "H"],
@@ -107,7 +106,6 @@ def test__export_well_bimolecular_barrier_round_trip(
     frag2 = _stationary(database, calculation_row, frag2_geo)
     _with_energy(database, calculation_row, frag1_geo, -55.6)
     _with_energy(database, calculation_row, frag2_geo, -20.3)
-    bimolecular_stage = StageRow(stationaries=[frag1, frag2])
 
     ts_geo = GeometryRow(
         symbols=["N", "H", "H"],
@@ -117,6 +115,12 @@ def test__export_well_bimolecular_barrier_round_trip(
     )
     ts = _stationary(database, calculation_row, ts_geo, order=1)
     _with_energy(database, calculation_row, ts_geo, -75.5)
+
+    # All three stages are built together, right before `step`, so no intervening
+    # `database.commit()` (from the helpers above) flushes the session while one is
+    # linked via backref to a persistent stationary but not yet in the session itself.
+    well_stage = StageRow(stationaries=[ref])
+    bimolecular_stage = StageRow(stationaries=[frag1, frag2])
     ts_stage = StageRow(stationaries=[ts], is_ts=True)
 
     step = StepRow(stage1=well_stage, stage2=bimolecular_stage, stage_ts=ts_stage)

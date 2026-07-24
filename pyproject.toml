@@ -42,6 +42,7 @@ ignore = [
     "TID252",   # relative import
     "D203",     # confict: incorrect blank line before class (uses D211 instead)
     "D213",     # conflict: multi-line summary second line (uses D212 instead)
+    "CPY001",   # missing copyright
 ]
 
 [tool.ruff.lint.per-file-ignores]

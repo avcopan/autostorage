@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+
+- **`GeometryRow.geometry_hash`, `.find_or_create`**: A `sha256` hash of `symbols`/`coordinates`/`charge`/`spin`, backed by a unique constraint, plus a `find_or_create` classmethod (same `commit`-flag pattern as `ModelRow.find_or_create`) that reuses a matching row instead of inserting a duplicate. Only catches bit-identical content — a rotated/translated/jittered near-duplicate conformer still gets its own row.
+- **Migration** for the new `geometry.geometry_hash` column: backfills existing rows before tightening to `NOT NULL` + unique, since SQLite can't add a populated column straight to that state.
+
+### Changed
+
+- **`Database.merge_from`**: `GeometryRow` is now deduplicated against the target's existing content (via `GeometryRow.find_or_create`), alongside `ModelRow` and non-auto-managed `IdentityRow`s.
+
+### Fixed
+
+- **Stationary/Hessian order-consensus revalidation**: Moved from per-instance `before_insert`/`before_update` mapper events (`validate_geometry_orders`) to a session-level `before_flush` listener (`revalidate_geometry_orders_on_insert_update`). The mapper event fired too late in the flush cycle to persist mutations to already-clean sibling `StationaryPointRow`s, so SQLAlchemy silently dropped those updates instead of writing them.
+- **`_recompute_geometry_stationary_validity`**: Skips a `HessianRow` whose `.order` can't be computed yet (still pending its own shape validation later in the same flush) instead of raising the raw `ValueError`.
 
 ## [0.0.11] - 2026-07-23
 ### Added
