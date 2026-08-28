@@ -1,0 +1,121 @@
+@pre
+@style {
+  .calculation {
+    backgroundColor: #44BB99;
+  }
+  .model {
+    backgroundColor: #DDDDDD;
+  }
+  .geometry {
+    backgroundColor: #99DDFF;
+  }
+  .trajectory {
+    backgroundColor: #BBCC33;
+  }
+  .result {
+    backgroundColor: #77AADD;
+  }
+  .stationary {
+    backgroundColor: #EE8866;
+  }
+  .stage {
+    backgroundColor: #FFAABB;
+  }
+  .step {
+    backgroundColor: #AA4499;
+  }
+}
+@endpre
+
+erDiagram
+    %% Universal styling
+    @param stroke #000000
+    @param labelBackground #FFFFFF
+    @param fontSize 36
+    @param fontFamily "Georgia"
+    @param entityPaddingX 30
+    @param entityPaddingY 30
+    @param ranksep 150
+    @param edgesep 175
+
+    %% Style binds
+    @bindClass entity-model model
+    @bindClass entity-calculation calculation
+    @bindClass entity-geometry geometry
+    @bindClass entity-trajectory trajectory
+    @bindClass entity-energy result
+    @bindClass entity-gradient result
+    @bindClass entity-hessian result
+    @bindClass entity-stationary_point stationary
+    @bindClass entity-identity stationary
+    @bindClass entity-identity_extra stationary
+    @bindClass entity-stage stage
+    @bindClass entity-step step
+    @bindClass entity-validation step
+
+    %% Attributes
+    model {
+    string program
+    string method
+    string basis
+    }
+    calculation {
+    enum calc_type
+    json input_provenance
+    json output_provenance
+    }
+    geometry {
+    json symbols
+    blob coordinates
+    int charge
+    int spin
+    }
+    energy {
+    }
+    gradient {
+    }
+    hessian {
+    }
+    stationary_point {
+    int order
+    bool is_pseudo
+    }
+    identity {
+    }
+    identity_extra {
+    } 
+    stage {
+    bool is_ts
+    }
+    step {
+    bool is_barrierless
+    }
+    validation {
+    }
+
+
+    %% Entity Relationships
+    model }o--|| calculation : "specifies"
+
+    calculation }o--o{ geometry : "I/O"
+    calculation }o--o{ trajectory : "I/O"
+    calculation ||..o{ energy : "produces"
+    calculation ||..o{ gradient : "produces"
+    calculation ||..o{ hessian : "produces"
+    calculation ||..o{ stationary_point : "produces"
+    calculation ||..o{ validation : "performs"
+
+    geometry }o--o{ trajectory : "member of"
+    energy }o..|| geometry : "from"
+    gradient }o..|| geometry : "from"
+    hessian }o..|| geometry : "from"
+
+    stationary_point }o..|| geometry : "has"
+    stationary_point }o--o{ identity : "has"
+    stationary_point }o--o{ stage : "species of"
+
+    identity ||--o{ identity_extra : "has"
+    
+    stage ||..o{ step : "node of"
+
+    validation }o--o{ step : "validates"

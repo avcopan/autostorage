@@ -15,7 +15,7 @@ Install as a [Pixi](https://pixi.sh) dependency:
 
 ```toml
 [dependencies]
-autostorage = ">=0.0.10"
+autostorage = ">=0.0.12"
 ```
 
 Or with `uv`/`pip` from PyPI:
@@ -31,7 +31,6 @@ Requires Python ≥3.12.
 ```python
 import numpy as np
 from autostorage import (
-    CalcType,
     CalculationGeometryLink,
     CalculationRow,
     Database,
@@ -44,51 +43,59 @@ from autostorage import (
 # Open (or create) a SQLite database; ":memory:" also works for scratch use.
 db = Database("workflow.db")
 
-# `find_or_create` dedups on (program, program_version, method, basis).
-model = ModelRow.find_or_create(db, program="orca", method="b3lyp", basis="def2-svp")
+# Work within a session context.
+with db.session() as session:
+    # Create a model specifying the calculation type, program, method, and basis.
+    model = ModelRow(
+        calc_type="energy",
+        program="orca",
+        method="b3lyp",
+        basis="def2-svp",
+    )
 
-calc = CalculationRow(model=model, calc_type=CalcType.ENERGY)
-geo = GeometryRow(
-    symbols=["H", "O", "H"],
-    coordinates=np.array([[0, 0, 0.8], [0, 0, 0], [0.8, 0, 0]]),
-    charge=0,
-    spin=0,
-)
-link = CalculationGeometryLink.create(calc, geo, role=Role.INPUT)
-db.add_all([model, calc, geo, link])
-db.commit()
+    # Create a calculation using this model.
+    calc = CalculationRow(model=model)
 
-# Attach a result to the geometry/calculation pair.
-energy = EnergyRow(geometry=geo, calculation=calc, value=-76.02)
-db.add(energy)
-db.commit()
+    # Create a geometry.
+    geo = GeometryRow(
+        symbols=["H", "O", "H"],
+        coordinates=np.array([[0, 0, 0.8], [0, 0, 0], [0.8, 0, 0]]),
+        charge=0,
+        spin=0,
+    )
 
-# Look the result back up by geometry, model, and input provenance.
-found = EnergyRow.query(db, geo=geo, model=model)
-assert found is not None
-print(found.value)
+    # Link the geometry to the calculation as an input.
+    link = CalculationGeometryLink(
+        calculation=calc,
+        geometry=geo,
+        role=Role.INPUT,
+    )
+
+    # Add all objects to the session and commit.
+    session.add_all([model, calc, geo, link])
+    session.commit()
+
+    # Attach an energy result to the geometry/calculation pair.
+    energy = EnergyRow(geometry=geo, calculation=calc, value=-76.02)
+    session.add(energy)
+    session.commit()
+
+    # Query the result back by filtering on geometry and calculation.
+    found = session.query(EnergyRow).filter_by(
+        geometry_id=geo.id,
+        calculation_id=calc.id,
+    ).first()
+    assert found is not None
+    print(found.value)
 
 db.close()
 ```
 
-`Database` also supports the `with` statement, which rolls back on an unhandled exception and closes the connection on exit:
+`Database.session()` returns a standard SQLAlchemy `Session` that supports the context manager protocol. Sessions don't commit automatically — call `session.commit()` explicitly to persist changes.
 
-```python
-with Database("workflow.db") as db:
-    ...
-```
+For a full worked example covering geometries, trajectories, results, stationary points, stages, and steps, see [`examples/stationary.py`](examples/stationary.py).
 
-Two databases can be combined with `Database.merge_from()`, which copies every row from one into the other, remapping ids/foreign keys and deduplicating content-unique rows (models, non-auto-managed identities) against the target's existing data:
-
-```python
-with Database("combined.db") as target, Database("other.db") as other:
-    report = target.merge_from(other)
-    print(report.copied, report.reused)  # per-table row counts
-```
-
-For a full worked example covering geometries, trajectories, results, and identities, see [`examples/stationary_point.py`](examples/stationary_point.py). Reaction networks (`StageRow`/`StepRow`) can be exported as [MESS](https://tcg.cse.anl.gov/papr/codes/mess.html) input via `autostorage.utils.export_mess_input()`, or rendered as a potential energy surface diagram via `autostorage.utils.plot_pes()`.
-
-See `CLAUDE.md` for the full module map and architecture notes.
+See [CLAUDE.md](.claude/CLAUDE.md) for the full module map and architecture notes, or the [Sphinx docs](docs/source) for a rendered quickstart and API reference.
 
 ## Contributing
 

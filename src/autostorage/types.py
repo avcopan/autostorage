@@ -10,13 +10,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field
 
-__all__ = [
-    "CalcStatus",
-    "CalcType",
-    "CompressedArrayTypeDecorator",
-    "Role",
-    "_fk_field",
-]
+__all__ = ["CompressedArrayTypeDecorator", "Role"]
 
 
 def _fk_field(target: str, *, nullable: bool = False, index: bool = True) -> Any:  # noqa: ANN401
@@ -68,74 +62,3 @@ class Role(StrEnum):
 
     INPUT = "input"
     OUTPUT = "output"
-
-
-class CalcType(StrEnum):
-    """Primary calculation types.
-
-    Attributes
-    ----------
-    OPT
-        Geometry optimization to find a local minimum on the PES.
-    OPT_TS
-        Saddle-point geometry optimization to locate a transition state structure.
-    CONFORMER
-        Conformational search/sampling to identify low-energy spatial arrangements.
-    SCAN
-        PES scan across user-defined geometric coordinates.
-    IRC
-        Intrinsic Reaction Coordinate mapping minimum energy pathway from TS to
-        its connected reactants and products.
-    MEP
-        Minimum Energy Path multi-image chain searches (e.g., Nudged Elastic Band,
-        String Methods) to discover reaction trajectories and TS guesses.
-    ENERGY
-        Single-point electronic energy evaluation at a fixed molecular geometry.
-    GRADIENT
-        Nuclear gradient evaluation to compute forces acting on the atoms.
-    FREQUENCY
-        Vibrational frequency analysis to verify stationary point order and compute
-        a Hessian/zero-point energy.
-    THERMO
-        Statistical mechanics/thermochemical parsing to determine enthalpy (`H`),
-        entropy (`S`), and Gibbs free energy (`G`).
-    UNDEFINED
-        Placeholder for generic or unclassified calculation types.
-    """
-
-    # Structural exploration
-    OPT = "optimization"
-    OPT_TS = "transition_optimization"
-    CONFORMER = "conformer_search"
-    # Path generation
-    SCAN = "scan"
-    IRC = "intrinsic_reaction_coordinate"
-    MEP = "minimum_energy_path_search"
-    # Properties
-    ENERGY = "energy"
-    GRADIENT = "gradient"
-    FREQUENCY = "frequency"
-    THERMO = "thermochemistry"
-    # Fallback
-    UNDEFINED = "undefined"
-
-
-class CalcStatus(StrEnum):
-    """Lifecycle status of a calculation.
-
-    Attributes
-    ----------
-    PENDING
-        Queued but not yet started.
-    RUNNING
-        Currently executing.
-    SUCCEEDED
-        Completed successfully.
-    FAILED
-        Terminated with an error.
-    """
-
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"

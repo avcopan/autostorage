@@ -6,7 +6,7 @@ preview = ["pixi-build"]
 [dependencies]
 python = ">=3.12,<3.14"
 autostorage = { path = "." }
-automol = "==0.0.19"  # local:false
+automol = "==0.0.22"  # local:false
 # automol = { path = "../automol" }  # local:true
 matplotlib-base = ">=3.8"
 

@@ -1,792 +1,1058 @@
-"""Autostorage models tests."""
+"""Models module tests."""
+
+import tempfile
+from collections.abc import Generator
+from pathlib import Path
 
 import numpy as np
 import pytest
-from automol import Algorithm
-from numpy.random import Generator
-from scipy.spatial.transform import Rotation
 from sqlalchemy.exc import IntegrityError
 
-from autostorage import (
-    CalcStatus,
-    CalcType,
+from autostorage.database import Database
+from autostorage.models import (
     CalculationGeometryLink,
     CalculationRow,
-    Database,
+    CalculationTrajectoryLink,
+    EnergyRow,
     GeometryRow,
+    GeometryTrajectoryLink,
     GradientRow,
     HessianRow,
+    IdentityExtraRow,
+    IdentityRow,
+    IdentityStationaryLink,
     ModelRow,
     StageRow,
+    StageStationaryLink,
     StationaryPointRow,
     StepRow,
+    StepValidationLink,
     TrajectoryRow,
     ValidationRow,
 )
-from autostorage.exc import DataIntegrityError, ResultShapeError
-from autostorage.models import CalculationTrajectoryLink
 from autostorage.types import Role
 
 
-def test__model_null_safe_index_catches_duplicate(database: Database) -> None:
-    """Test that a direct duplicate insert (bypassing find_or_create) is rejected.
-
-    `unique_model` alone doesn't catch this, since SQL treats NULL as distinct
-    from itself; `unique_model_null_safe` is the defense-in-depth index that does.
-    """
-    database.add(ModelRow(program="orca", method="xtb"))
-    database.add(ModelRow(program="orca", method="xtb"))
-
-    with pytest.raises(IntegrityError):
-        database.commit()
-
-
-def test__calculation_default_status_is_pending(model_row: ModelRow) -> None:
-    """Test that a bare CalculationRow defaults to PENDING with no error message."""
-    calculation = CalculationRow(model=model_row, calc_type=CalcType.UNDEFINED)
-
-    assert calculation.status == CalcStatus.PENDING
-    assert calculation.error_message is None
-
-
-def test__calculation_status_transitions(
-    database: Database, model_row: ModelRow
-) -> None:
-    """Test that status/error_message round-trip through the database."""
-    calculation = CalculationRow(
-        model=model_row,
-        calc_type=CalcType.UNDEFINED,
-        status=CalcStatus.FAILED,
-        error_message="boom",
-    )
-    database.add(calculation)
-    database.commit()
-    assert calculation.id is not None
-
-    fetched = database.get(CalculationRow, calculation.id)
-    assert fetched.status == CalcStatus.FAILED
-    assert fetched.error_message == "boom"
-
-
-def test__calculation_geometry_role_properties(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    calc_geo_link: CalculationGeometryLink,
-) -> None:
-    """Test that input_geometries/output_geometries filter links by role."""
-    output_geometry = GeometryRow(
-        symbols=["H", "O", "H"],
-        coordinates=np.array([[0, 0, 0.9], [0, 0, 0], [0.9, 0, 0]]),
-        charge=0,
-        spin=0,
-    )
-    output_link = CalculationGeometryLink(
-        calculation=calculation_row, geometry=output_geometry, role=Role.OUTPUT
-    )
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(calc_geo_link)
-    database.add(output_geometry)
-    database.add(output_link)
-    database.commit()
-
-    assert calculation_row.input_geometries == [geometry_row]
-    assert calculation_row.output_geometries == [output_geometry]
-
-
-def test__calculation_trajectory_role_properties(
-    database: Database, calculation_row: CalculationRow
-) -> None:
-    """Test that input_trajectories/output_trajectories filter links by role."""
-    # Committed one at a time: TrajectoryRow has no non-base columns, and
-    # SQLite's batched multi-row insert can't apply the created_at
-    # server_default to two such rows in a single flush.
-    input_trajectory = TrajectoryRow()
-    database.add(input_trajectory)
-    database.commit()
-    output_trajectory = TrajectoryRow()
-    database.add(output_trajectory)
-    database.commit()
-
-    input_link = CalculationTrajectoryLink(
-        calculation=calculation_row, trajectory=input_trajectory, role=Role.INPUT
-    )
-    output_link = CalculationTrajectoryLink(
-        calculation=calculation_row, trajectory=output_trajectory, role=Role.OUTPUT
-    )
-    database.add(calculation_row)
-    database.add(input_link)
-    database.add(output_link)
-    database.commit()
-
-    assert calculation_row.input_trajectories == [input_trajectory]
-    assert calculation_row.output_trajectories == [output_trajectory]
-
-
-def test__validation_requires_calculation(database: Database) -> None:
-    """Test that a ValidationRow without a calculation is rejected."""
-    database.add(ValidationRow(method="irc"))
-
-    with pytest.raises(IntegrityError):
-        database.commit()
-
-
-def test__gradient_shape(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    calc_geo_link: CalculationGeometryLink,
-    rng: Generator,
-) -> None:
-    """Test gradient shape is validated before committing to database."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(calc_geo_link)
-
-    gradient = GradientRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=rng.uniform(size=2),
-    )
-    database.add(gradient)
-    with pytest.raises(ResultShapeError):
-        database.commit()
-
-
-def test__hessian_shape(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    calc_geo_link: CalculationGeometryLink,
-    rng: Generator,
-) -> None:
-    """Test hessian shape is validated before committing to database."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(calc_geo_link)
-    database.commit()
-
-    hess = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=rng.uniform(size=(3, 2)),
-    )
-    database.add(hess)
-
-    with pytest.raises(ResultShapeError):
-        database.commit()
-
-
-def test__geometry_symbols_immutable_after_insert(
-    database: Database, geometry_row: GeometryRow
-) -> None:
-    """Test that mutating symbols after insert is rejected."""
-    database.add(geometry_row)
-    database.commit()
-
-    geometry_row.symbols = ["H", "O", "O"]
-    database.add(geometry_row)
-    with pytest.raises(DataIntegrityError, match="symbols"):
-        database.commit()
-
-
-def test__geometry_coordinates_immutable_after_insert(
-    database: Database, geometry_row: GeometryRow
-) -> None:
-    """Test that mutating coordinates after insert is rejected."""
-    database.add(geometry_row)
-    database.commit()
-
-    geometry_row.coordinates = np.array(geometry_row.coordinates) + 0.1
-    database.add(geometry_row)
-    with pytest.raises(DataIntegrityError, match="coordinates"):
-        database.commit()
-
-
-def test__geometry_charge_and_spin_remain_mutable(
-    database: Database, geometry_row: GeometryRow
-) -> None:
-    """Test that charge/spin can still be updated after insert."""
-    database.add(geometry_row)
-    database.commit()
-    assert geometry_row.id
-
-    geometry_row.charge = 1
-    geometry_row.spin = 1
-    database.add(geometry_row)
-    database.commit()
-
-    fetched = database.get(GeometryRow, geometry_row.id)
-    assert fetched.charge == 1
-    assert fetched.spin == 1
-
-
-def test__geometry_unique_hash_catches_direct_duplicate_insert(
-    database: Database, geometry_row: GeometryRow
-) -> None:
-    """Test that a direct duplicate insert of identical geometry content is rejected."""
-    duplicate = GeometryRow(
-        symbols=list(geometry_row.symbols),
-        coordinates=np.array(geometry_row.coordinates),
-        charge=geometry_row.charge,
-        spin=geometry_row.spin,
-    )
-    database.add(geometry_row)
-    database.add(duplicate)
-
-    with pytest.raises(IntegrityError):
-        database.commit()
-
-
-def test__geometry_near_duplicate_is_not_deduped(
-    database: Database, geometry_row: GeometryRow, rng: Generator
-) -> None:
-    """Test that a rotated/translated/jittered near-duplicate is a distinct row.
-
-    `geometry_hash` only catches bit-identical content; chemically-equivalent
-    but numerically distinct conformers are handled separately (and more
-    coarsely) by `events.py`'s InChI/conformer identity matching.
-    """
-    near_duplicate = _jittered_copy(geometry_row, rng)
-
-    database.add(geometry_row)
-    database.add(near_duplicate)
-    database.commit()
-
-    assert geometry_row.id is not None
-    assert near_duplicate.id is not None
-    assert geometry_row.id != near_duplicate.id
-
-
-def test__hessian_properties(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    calc_geo_link: CalculationGeometryLink,
-    rng: Generator,
-) -> None:
-    """Test hessian harmonic frequencies and order properties."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(calc_geo_link)
-
-    n = geometry_row.to_geometry().atom_count
-    hessian = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=rng.uniform(size=(3 * n, 3 * n)),
-    )
-    assert hessian.harmonic_frequencies
-    assert hessian.order
-
-
-def test__hessian_frequency_cache_invalidated_on_value_update(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    calc_geo_link: CalculationGeometryLink,
-    rng: Generator,
-) -> None:
-    """Test that updating `value` invalidates the cached harmonic frequencies.
-
-    `harmonic_frequencies` is a `functools.cached_property`; `Session.commit()`
-    doesn't clear cached-property entries (only mapped attributes), so this
-    guards against `invalidate_hessian_frequency_cache` regressing and leaving
-    stale frequencies/order behind after an in-place `value` update.
-    """
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(calc_geo_link)
-
-    n = geometry_row.to_geometry().atom_count
-    hessian = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=rng.uniform(size=(3 * n, 3 * n)),
-    )
-    database.add(hessian)
-    database.commit()
-
-    original_frequencies = hessian.harmonic_frequencies
-    assert "harmonic_frequencies" in hessian.__dict__
-
-    hessian.value = rng.uniform(size=(3 * n, 3 * n))
-    database.add(hessian)
-    database.commit()
-
-    assert hessian.harmonic_frequencies != original_frequencies
-
-
-def test__stationary_inchi(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test InChI is attached before committing to database."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-
-    stationary = StationaryPointRow(
-        calculation=calculation_row, geometry=geometry_row, order=0
-    )
-    database.add(stationary)
-    database.commit()
-
-    assert stationary.identities[0].value == "InChI=1S/H2O/h1H2"
-
-
-def test__stationary_inchi_resolves_unattached_geometry_id(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test InChI/conformer identities attach when only `geometry_id` is set.
-
-    Regression test: `add_inchi_identities`/`assign_conformer_ids` must
-    resolve the geometry via the session (like the shape/order validators
-    do), rather than reading the `.geometry` relationship directly, which
-    stays unpopulated until the ORM syncs it.
-    """
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.flush()
-
-    stationary = StationaryPointRow(
-        calculation_id=calculation_row.id, geometry_id=geometry_row.id, order=0
-    )
-    database.add(stationary)
-    database.commit()
-
-    assert stationary.identities[0].value == "InChI=1S/H2O/h1H2"
-    assert stationary.identity(algorithm=Algorithm.IRMSD) is not None
-
-
-def test__stationary_identity_matches_by_kind_and_algorithm(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test identity() lookup by kind, algorithm, both, and no match."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-
-    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    database.add(stationary)
-    database.commit()
-
-    inchi = stationary.identity(kind="stereoisomer")
-    assert inchi
-    assert inchi.value == "InChI=1S/H2O/h1H2"
-
-    conformer = stationary.identity(algorithm=Algorithm.IRMSD)
-    assert conformer
-    assert conformer.kind == "conformer"
-
-    assert (
-        stationary.identity(kind="stereoisomer", algorithm=Algorithm.RDKIT_INCHI)
-        is inchi
-    )
-    assert stationary.identity(kind="nonexistent") is None
-
-
-def test__stationary_order_hessian_first(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test stationary point order is validated when geometry Hessian is present.
-
-    Corrects a valid StationaryPointRow marked as invalid.
-    """
-    database.add(calculation_row)
-    database.add(geometry_row)
-
-    n = geometry_row.to_geometry().atom_count
-    hessian_row = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=np.zeros((3 * n, 3 * n)),
-    )
-    database.add(hessian_row)
-
-    stationary = StationaryPointRow(
-        calculation=calculation_row, geometry=geometry_row, order=0, is_valid=False
-    )
-    database.add(stationary)
-    assert not stationary.is_valid
-
-    database.commit()
-    assert stationary.is_valid
-
-
-def test__stationary_order_hessian_second(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test stationary point order is validated when geometry Hessian is present.
-
-    Corrects an invalid StationaryPointRow marked as valid.
-    """
-    database.add(calculation_row)
-    database.add(geometry_row)
-
-    stationary = StationaryPointRow(
-        calculation=calculation_row, geometry=geometry_row, order=1, is_valid=True
-    )
-    database.add(stationary)
-    assert stationary.is_valid
-
-    n = geometry_row.to_geometry().atom_count
-    hessian_row = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=np.zeros((3 * n, 3 * n)),
-    )
-    database.add(hessian_row)
-
-    database.commit()
-    assert not stationary.is_valid
-
-
-def test__hessian_delete_leaves_is_valid_correct_with_remaining_hessian(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that deleting one of two agreeing Hessians keeps is_valid correct."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    n = geometry_row.to_geometry().atom_count
-    hessian1 = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=np.zeros((3 * n, 3 * n)),
-    )
-    hessian2 = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=np.zeros((3 * n, 3 * n)),
-    )
-    database.add(hessian1)
-    database.add(hessian2)
-
-    stationary = StationaryPointRow(
-        calculation=calculation_row, geometry=geometry_row, order=0
-    )
-    database.add(stationary)
-    database.commit()
-    assert stationary.is_valid
-
-    database.delete(hessian1)
-    assert stationary.is_valid
-
-
-def test__hessian_delete_leaves_is_valid_untouched_when_no_hessians_remain(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that deleting the last Hessian doesn't reset is_valid to False."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    n = geometry_row.to_geometry().atom_count
-    hessian = HessianRow(
-        calculation=calculation_row,
-        geometry=geometry_row,
-        value=np.zeros((3 * n, 3 * n)),
-    )
-    database.add(hessian)
-
-    stationary = StationaryPointRow(
-        calculation=calculation_row, geometry=geometry_row, order=0
-    )
-    database.add(stationary)
-    database.commit()
-    assert stationary.is_valid
-
-    database.delete(hessian)
-    assert stationary.is_valid
-
-
-def test__step_null_safe_index_catches_barrierless_duplicate(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that a direct duplicate barrierless step insert fails.
-
-    `unq_step_stages` alone doesn't catch this, since `stage_id_ts` is NULL for
-    both rows and SQL treats NULL as distinct from itself; `unq_step_stages_null_safe`
-    is the defense-in-depth index that does.
-    """
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    database.add(stationary1)
-    database.add(stationary2)
-    database.commit()
-
-    stage1 = StageRow(stationaries=[stationary1])
-    stage2 = StageRow(stationaries=[stationary2])
-    database.add(stage1)
-    database.add(stage2)
-    database.commit()
-
-    database.add(StepRow(stage1=stage1, stage2=stage2))
-    database.add(StepRow(stage1=stage1, stage2=stage2))
-
-    with pytest.raises(IntegrityError):
-        database.commit()
-
-
-def test__step_rejects_ts_stage_as_stage1_or_stage2(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that a TS stage cannot be used as stage1/stage2."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    database.add(stationary1)
-    database.add(stationary2)
-    database.commit()
-
-    stage_ts = StageRow(stationaries=[stationary1], is_ts=True)
-    stage2 = StageRow(stationaries=[stationary2])
-    database.add(stage_ts)
-    database.add(stage2)
-    database.commit()
-
-    database.add(StepRow(stage1=stage_ts, stage2=stage2))
-    with pytest.raises(DataIntegrityError, match="transition-state"):
-        database.commit()
-
-
-def test__step_rejects_non_ts_stage_as_stage_ts(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that a non-TS stage cannot be used as stage_ts."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    stationaries = [
-        StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-        for _ in range(3)
-    ]
-    for stationary in stationaries:
-        database.add(stationary)
-    database.commit()
-
-    stage1, stage2, stage3 = (StageRow(stationaries=[s]) for s in stationaries)
-    database.add(stage1)
-    database.add(stage2)
-    database.add(stage3)
-    database.commit()
-
-    database.add(StepRow(stage1=stage1, stage2=stage2, stage_ts=stage3))
-    with pytest.raises(DataIntegrityError, match="stage_ts"):
-        database.commit()
-
-
-def test__step_accepts_consistent_ts_configuration(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that a step with a genuine TS stage commits without error."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.commit()
-
-    stationaries = [
-        StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-        for _ in range(3)
-    ]
-    for stationary in stationaries:
-        database.add(stationary)
-    database.commit()
-
-    stage1 = StageRow(stationaries=[stationaries[0]])
-    stage2 = StageRow(stationaries=[stationaries[1]])
-    stage_ts = StageRow(stationaries=[stationaries[2]], is_ts=True)
-    database.add(stage1)
-    database.add(stage2)
-    database.add(stage_ts)
-    database.commit()
-
-    step = StepRow(stage1=stage1, stage2=stage2, stage_ts=stage_ts)
-    database.add(step)
-    database.commit()
-
-    assert step.id is not None
-    assert not step.is_barrierless
-
-
-def _hooh_geometry_row(dihedral_deg: float) -> GeometryRow:
-    """Build an HOOH GeometryRow at a given H-O-O-H dihedral angle."""
-    roo, roh, hoo_ang = 1.45, 0.97, np.radians(100.0)
-    dih = np.radians(dihedral_deg)
-    o1 = np.array([0, 0, 0])
-    o2 = np.array([roo, 0, 0])
-    h1 = o1 + roh * np.array([-np.cos(hoo_ang), np.sin(hoo_ang), 0])
-    base = roh * np.array([np.cos(hoo_ang), np.sin(hoo_ang), 0])
-    rot = np.array(
-        [
-            [1, 0, 0],
-            [0, np.cos(dih), -np.sin(dih)],
-            [0, np.sin(dih), np.cos(dih)],
-        ]
-    )
-    h2 = o2 + rot @ base
-    coordinates = np.array([h1, o1, o2, h2])
-    return GeometryRow(
-        symbols=["H", "O", "O", "H"], coordinates=coordinates, charge=0, spin=0
-    )
-
-
-def _jittered_copy(geometry_row: GeometryRow, rng: Generator) -> GeometryRow:
-    """Build a small-noise, rotated, translated copy of a geometry."""
-    coordinates = np.array(geometry_row.coordinates)
-    coordinates = coordinates + rng.normal(scale=0.01, size=coordinates.shape)
-    rot = Rotation.from_euler("xyz", [30, 20, 10], degrees=True)
-    coordinates = rot.apply(coordinates) + np.array([3.0, 3.0, 3.0])
-    return GeometryRow(
-        symbols=list(geometry_row.symbols),
-        coordinates=coordinates,
-        charge=geometry_row.charge,
-        spin=geometry_row.spin,
-    )
-
-
-def test__conformer_identity_merge_on_duplicate_geometry(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    rng: Generator,
-) -> None:
-    """Test that near-identical geometries share one conformer identity."""
-    duplicate_geometry = _jittered_copy(geometry_row, rng)
-
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(duplicate_geometry)
-
-    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    stationary2 = StationaryPointRow(
-        calculation=calculation_row, geometry=duplicate_geometry
-    )
-    database.add(stationary1)
-    database.add(stationary2)
-    database.commit()
-
-    conformer1 = next(i for i in stationary1.identities if i.kind == "conformer")
-    conformer2 = next(i for i in stationary2.identities if i.kind == "conformer")
-    assert conformer1.id == conformer2.id
-
-
-def test__conformer_identity_merge_with_unattached_geometry_ids(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    rng: Generator,
-) -> None:
-    """Test conformer dedup when peers are built with only `geometry_id` set.
-
-    Regression test: `_matching_conformer_identity` must resolve each InChI
-    peer's geometry the same way it resolves the target row's own geometry
-    (via the session, for a row with only `geometry_id` set), rather than
-    reading a peer's `.geometry` relationship directly, which stays
-    unpopulated until the ORM syncs it — as is the case for rows built by a
-    bulk loader like a database merge rather than via `.geometry=`.
-    """
-    duplicate_geometry = _jittered_copy(geometry_row, rng)
-
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(duplicate_geometry)
-    database.flush()
-
-    stationary1 = StationaryPointRow(
-        calculation_id=calculation_row.id, geometry_id=geometry_row.id
-    )
-    stationary2 = StationaryPointRow(
-        calculation_id=calculation_row.id, geometry_id=duplicate_geometry.id
-    )
-    database.add(stationary1)
-    database.add(stationary2)
-    database.commit()
-
-    conformer1 = next(i for i in stationary1.identities if i.kind == "conformer")
-    conformer2 = next(i for i in stationary2.identities if i.kind == "conformer")
-    assert conformer1.id == conformer2.id
-
-
-def test__conformer_identity_split_on_distinct_conformer(
-    database: Database, calculation_row: CalculationRow
-) -> None:
-    """Test that geometrically distinct conformers of the same species split."""
-    anti = _hooh_geometry_row(180)
-    gauche = _hooh_geometry_row(60)
-
-    database.add(calculation_row)
-    database.add(anti)
-    database.add(gauche)
-
-    stationary1 = StationaryPointRow(calculation=calculation_row, geometry=anti)
-    stationary2 = StationaryPointRow(calculation=calculation_row, geometry=gauche)
-    database.add(stationary1)
-    database.add(stationary2)
-    database.commit()
-
-    conformer1 = next(i for i in stationary1.identities if i.kind == "conformer")
-    conformer2 = next(i for i in stationary2.identities if i.kind == "conformer")
-    assert conformer1.value != conformer2.value
-
-
-def test__conformer_group_id_increments_across_distinct_species_in_one_flush(
-    database: Database,
-    calculation_row: CalculationRow,
-    geometry_row: GeometryRow,
-    rng: Generator,
-) -> None:
-    """Test that one flush assigns distinct group ids to distinct species."""
-    duplicate_geometry = _jittered_copy(geometry_row, rng)
-    hooh_geometry = _hooh_geometry_row(180)
-
-    database.add(calculation_row)
-    database.add(geometry_row)
-    database.add(duplicate_geometry)
-    database.add(hooh_geometry)
-
-    water1 = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    water2 = StationaryPointRow(
-        calculation=calculation_row, geometry=duplicate_geometry
-    )
-    hooh = StationaryPointRow(calculation=calculation_row, geometry=hooh_geometry)
-    database.add(water1)
-    database.add(water2)
-    database.add(hooh)
-    database.commit()
-
-    water1_conf = next(i for i in water1.identities if i.kind == "conformer")
-    water2_conf = next(i for i in water2.identities if i.kind == "conformer")
-    hooh_conf = next(i for i in hooh.identities if i.kind == "conformer")
-
-    assert water1_conf.id == water2_conf.id
-    assert hooh_conf.id != water1_conf.id
-
-
-def test__conformer_identity_idempotent_on_second_flush(
-    database: Database, calculation_row: CalculationRow, geometry_row: GeometryRow
-) -> None:
-    """Test that re-flushing an already-committed stationary point is idempotent."""
-    database.add(calculation_row)
-    database.add(geometry_row)
-
-    stationary = StationaryPointRow(calculation=calculation_row, geometry=geometry_row)
-    database.add(stationary)
-    database.commit()
-
-    conformer_id = next(i for i in stationary.identities if i.kind == "conformer").id
-
-    stationary.order = 1
-    database.add(stationary)
-    database.commit()
-
-    conformer_identities = [i for i in stationary.identities if i.kind == "conformer"]
-    assert len(conformer_identities) == 1
-    assert conformer_identities[0].id == conformer_id
+@pytest.fixture
+def db_path() -> Generator[Path, None, None]:
+    """Create a temporary database path for testing."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir) / "test.db"
+
+
+@pytest.fixture
+def database(db_path: Path) -> Generator[Database, None, None]:
+    """Create a Database instance for testing."""
+    db = Database(db_path)
+    yield db
+    db.close()
+
+
+class TestGeometryRow:
+    """Tests for GeometryRow model."""
+
+    def test_create_geometry_with_list_coordinates(self, database: Database) -> None:
+        """GeometryRow can be created with list coordinates."""
+        with database.session() as session:
+            geom = GeometryRow(
+                symbols=["C", "H"],
+                coordinates=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.commit()
+
+            assert geom.id is not None
+            assert isinstance(geom.coordinates, np.ndarray)
+            assert geom.coordinates.shape == (2, 3)
+
+    def test_create_geometry_with_numpy_coordinates(self, database: Database) -> None:
+        """GeometryRow can be created with numpy array coordinates."""
+        with database.session() as session:
+            coords = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+            geom = GeometryRow(symbols=["C", "H"], coordinates=coords, charge=0, spin=0)
+            session.add(geom)
+            session.commit()
+
+            assert geom.id is not None
+            assert isinstance(geom.coordinates, np.ndarray)
+            np.testing.assert_array_equal(geom.coordinates, coords)
+
+    def test_geometry_symbols_stored_as_json(self, database: Database) -> None:
+        """GeometryRow symbols are stored and retrieved correctly."""
+        with database.session() as session:
+            geom = GeometryRow(
+                symbols=["C", "O", "H"],
+                coordinates=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.commit()
+
+            result = session.query(GeometryRow).filter_by(id=geom.id).first()
+            assert result is not None
+            assert result.symbols == ["C", "O", "H"]
+
+    def test_geometry_charge_and_spin(self, database: Database) -> None:
+        """GeometryRow stores charge and spin correctly."""
+        with database.session() as session:
+            geom = GeometryRow(
+                symbols=["C"],
+                coordinates=[[0.0, 0.0, 0.0]],
+                charge=1,
+                spin=1,
+            )
+            session.add(geom)
+            session.commit()
+
+            assert geom.charge == 1
+            assert geom.spin == 1
+
+    def test_geometry_relationships(self, database: Database) -> None:
+        """GeometryRow relationships are initially empty."""
+        with database.session() as session:
+            geom = GeometryRow(
+                symbols=["C"],
+                coordinates=[[0.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.commit()
+
+            assert geom.energies == []
+            assert geom.gradients == []
+            assert geom.hessians == []
+            assert geom.stationary_points == []
+            assert geom.trajectory_links == []
+            assert geom.calculation_links == []
+
+
+class TestTrajectoryRow:
+    """Tests for TrajectoryRow model."""
+
+    def test_create_trajectory_with_ndim(self, database: Database) -> None:
+        """TrajectoryRow can be created with ndim specified."""
+        with database.session() as session:
+            traj = TrajectoryRow(ndim=3)
+            session.add(traj)
+            session.commit()
+
+            assert traj.id is not None
+            assert traj.ndim == 3  # noqa: PLR2004
+
+    def test_create_trajectory_without_ndim(self, database: Database) -> None:
+        """TrajectoryRow can be created without ndim."""
+        with database.session() as session:
+            traj = TrajectoryRow(ndim=None)
+            session.add(traj)
+            session.commit()
+
+            assert traj.id is not None
+            assert traj.ndim is None
+
+    def test_trajectory_relationships(self, database: Database) -> None:
+        """TrajectoryRow relationships are initially empty."""
+        with database.session() as session:
+            traj = TrajectoryRow(ndim=2)
+            session.add(traj)
+            session.commit()
+
+            assert traj.geometry_links == []
+            assert traj.calculation_links == []
+
+
+class TestModelRow:
+    """Tests for ModelRow model."""
+
+    def test_create_model_minimal(self, database: Database) -> None:
+        """ModelRow can be created with minimal required fields."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.commit()
+
+            assert model.id is not None
+            assert model.calc_type == "energy"
+            assert model.program == "psi4"
+            assert model.method == "B3LYP"
+            assert model.basis is None
+            assert model.program_version is None
+            assert model.keywords == {}
+
+    def test_create_model_complete(self, database: Database) -> None:
+        """ModelRow can be created with all fields specified."""
+        with database.session() as session:
+            model = ModelRow(
+                calc_type="gradient",
+                program="orca",
+                program_version="5.0.3",
+                method="MP2",
+                basis="cc-pvdz",
+                keywords={"convergence": "tight", "scf_type": "df"},
+            )
+            session.add(model)
+            session.commit()
+
+            assert model.id is not None
+            assert model.program_version == "5.0.3"
+            assert model.basis == "cc-pvdz"
+            assert model.keywords == {"convergence": "tight", "scf_type": "df"}
+
+    def test_model_keywords_default_empty_dict(self, database: Database) -> None:
+        """ModelRow keywords default to empty dict."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="gaussian", method="HF")
+            session.add(model)
+            session.commit()
+
+            assert model.keywords == {}
+
+
+class TestCalculationRow:
+    """Tests for CalculationRow model."""
+
+    def test_create_calculation(self, database: Database) -> None:
+        """CalculationRow can be created with a model reference."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(
+                model_id=model.id,
+                input_provenance={"source": "test"},
+                output_provenance={"status": "success"},
+            )
+            session.add(calc)
+            session.commit()
+
+            assert calc.id is not None
+            assert calc.model_id == model.id
+            assert calc.input_provenance == {"source": "test"}
+            assert calc.output_provenance == {"status": "success"}
+
+    def test_calculation_relationships(self, database: Database) -> None:
+        """CalculationRow relationships are initially empty."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.commit()
+
+            assert calc.energies == []
+            assert calc.gradients == []
+            assert calc.hessians == []
+            assert calc.validations == []
+            assert calc.stationary_points == []
+            assert calc.geometry_links == []
+            assert calc.trajectory_links == []
+
+    def test_calculation_model_relationship(self, database: Database) -> None:
+        """CalculationRow.model relationship works correctly."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.commit()
+
+            assert calc.model is not None
+            assert calc.model.id == model.id
+            assert calc.model.method == "B3LYP"
+
+    def test_calculation_requires_model(self, database: Database) -> None:
+        """CalculationRow requires a valid model_id."""
+        with database.session() as session:
+            calc = CalculationRow(model_id=9999)
+            session.add(calc)
+
+            with pytest.raises(IntegrityError):
+                session.commit()
+
+
+class TestResultRows:
+    """Tests for result row models (Energy, Gradient, Hessian)."""
+
+    def test_create_energy_row(self, database: Database) -> None:
+        """EnergyRow can be created with geometry and calculation."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            energy = EnergyRow(
+                geometry_id=geom.id, calculation_id=calc.id, value=-37.8422
+            )
+            session.add(energy)
+            session.commit()
+
+            assert energy.id is not None
+            assert energy.value == -37.8422  # noqa: PLR2004
+            assert energy.geometry_id == geom.id
+            assert energy.calculation_id == calc.id
+
+    def test_create_gradient_row(self, database: Database) -> None:
+        """GradientRow can be created with numpy array."""
+        with database.session() as session:
+            model = ModelRow(calc_type="gradient", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C", "H"],
+                coordinates=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.flush()
+
+            grad_value = np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+            gradient = GradientRow(
+                geometry_id=geom.id, calculation_id=calc.id, value=grad_value
+            )
+            session.add(gradient)
+            session.commit()
+
+            assert gradient.id is not None
+            np.testing.assert_array_equal(gradient.value, grad_value)
+
+    def test_create_hessian_row(self, database: Database) -> None:
+        """HessianRow can be created with 2D numpy array."""
+        with database.session() as session:
+            model = ModelRow(calc_type="frequency", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"],
+                coordinates=[[0.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.flush()
+
+            hess_value = np.eye(3, dtype=np.float32)
+            hessian = HessianRow(
+                geometry_id=geom.id, calculation_id=calc.id, value=hess_value
+            )
+            session.add(hessian)
+            session.commit()
+
+            assert hessian.id is not None
+            np.testing.assert_array_equal(hessian.value, hess_value)
+
+    def test_result_relationships(self, database: Database) -> None:
+        """Result rows have correct relationships to geometry and calculation."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            energy = EnergyRow(
+                geometry_id=geom.id, calculation_id=calc.id, value=-37.8422
+            )
+            session.add(energy)
+            session.commit()
+
+            assert energy.geometry is not None
+            assert energy.geometry.id == geom.id
+            assert energy.calculation is not None
+            assert energy.calculation.id == calc.id
+
+
+class TestValidationRow:
+    """Tests for ValidationRow model."""
+
+    def test_create_validation(self, database: Database) -> None:
+        """ValidationRow can be created with calculation reference."""
+        with database.session() as session:
+            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            validation = ValidationRow(
+                calculation_id=calc.id,
+                method="irc",
+                extras={"convergence": "tight"},
+            )
+            session.add(validation)
+            session.commit()
+
+            assert validation.id is not None
+            assert validation.method == "irc"
+            assert validation.extras == {"convergence": "tight"}
+
+    def test_validation_extras_default(self, database: Database) -> None:
+        """ValidationRow extras default to empty dict."""
+        with database.session() as session:
+            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            validation = ValidationRow(calculation_id=calc.id, method="irc")
+            session.add(validation)
+            session.commit()
+
+            assert validation.extras == {}
+
+
+class TestStationaryPointRow:
+    """Tests for StationaryPointRow model."""
+
+    def test_create_stationary_point(self, database: Database) -> None:
+        """StationaryPointRow can be created with default values."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            stat_pt = StationaryPointRow(geometry_id=geom.id, calculation_id=calc.id)
+            session.add(stat_pt)
+            session.commit()
+
+            assert stat_pt.id is not None
+            assert stat_pt.order == 0
+            assert stat_pt.is_pseudo is False
+            assert stat_pt.is_valid is False
+
+    def test_create_transition_state(self, database: Database) -> None:
+        """StationaryPointRow can represent a transition state (order=1)."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt_ts", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            # Add Hessian to make stationary point valid
+            rng = np.random.default_rng()
+            hessian = HessianRow(
+                geometry_id=geom.id,
+                calculation_id=calc.id,
+                value=rng.random((3, 3), dtype=np.float32),
+            )
+            session.add(hessian)
+            session.flush()
+
+            stat_pt = StationaryPointRow(
+                geometry_id=geom.id, calculation_id=calc.id, order=1, is_valid=True
+            )
+            session.add(stat_pt)
+            session.commit()
+
+            assert stat_pt.order == 1
+            assert stat_pt.is_valid is True
+
+    def test_stationary_point_relationships(self, database: Database) -> None:
+        """StationaryPointRow relationships work correctly."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            stat_pt = StationaryPointRow(geometry_id=geom.id, calculation_id=calc.id)
+            session.add(stat_pt)
+            session.commit()
+
+            assert stat_pt.geometry is not None
+            assert stat_pt.geometry.id == geom.id
+            assert stat_pt.calculation is not None
+            assert stat_pt.calculation.id == calc.id
+            # Note: auto-generated InChI identity from event listener
+            assert len(stat_pt.identities) >= 1
+            assert stat_pt.stages == []
+
+
+class TestStageRow:
+    """Tests for StageRow model."""
+
+    def test_create_stage_non_ts(self, database: Database) -> None:
+        """StageRow can be created as a non-TS stage."""
+        with database.session() as session:
+            stage = StageRow(is_ts=False)
+            session.add(stage)
+            session.commit()
+
+            assert stage.id is not None
+            assert stage.is_ts is False
+
+    def test_create_stage_ts(self, database: Database) -> None:
+        """StageRow can be created as a TS stage."""
+        with database.session() as session:
+            stage = StageRow(is_ts=True)
+            session.add(stage)
+            session.commit()
+
+            assert stage.id is not None
+            assert stage.is_ts is True
+
+    def test_stage_relationships(self, database: Database) -> None:
+        """StageRow relationships are initially empty."""
+        with database.session() as session:
+            stage = StageRow(is_ts=False)
+            session.add(stage)
+            session.commit()
+
+            assert stage.stationaries == []
+            assert stage.steps == []
+
+
+class TestStepRow:
+    """Tests for StepRow model."""
+
+    def test_create_barrierless_step(self, database: Database) -> None:
+        """StepRow can be created as a barrierless step."""
+        with database.session() as session:
+            stage1 = StageRow(is_ts=False)
+            stage2 = StageRow(is_ts=False)
+            session.add_all([stage1, stage2])
+            session.flush()
+
+            step = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                stage_id_ts=None,
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+            assert step.id is not None
+            assert step.stage_id_ts is None
+            assert step.is_barrierless is True
+
+    def test_create_step_with_ts(self, database: Database) -> None:
+        """StepRow can be created with a transition state."""
+        with database.session() as session:
+            stage1 = StageRow(is_ts=False)
+            stage2 = StageRow(is_ts=False)
+            stage_ts = StageRow(is_ts=True)
+            session.add_all([stage1, stage2, stage_ts])
+            session.flush()
+
+            step = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
+            )
+            session.add(step)
+            session.commit()
+
+            assert step.id is not None
+            assert step.stage_id_ts == stage_ts.id
+            assert step.is_barrierless is False
+
+    def test_step_unique_constraint(self, database: Database) -> None:
+        """StepRow enforces unique constraint on stage IDs."""
+        with database.session() as session:
+            stage1 = StageRow(is_ts=False)
+            stage2 = StageRow(is_ts=False)
+            stage_ts = StageRow(is_ts=True)
+            session.add_all([stage1, stage2, stage_ts])
+            session.flush()
+
+            step1 = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
+            )
+            session.add(step1)
+            session.flush()
+
+            # Try to create duplicate step
+            step2 = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
+            )
+            session.add(step2)
+
+            with pytest.raises(IntegrityError):
+                session.commit()
+
+    def test_step_stage_relationships(self, database: Database) -> None:
+        """StepRow stage relationships work correctly."""
+        with database.session() as session:
+            stage1 = StageRow(is_ts=False)
+            stage2 = StageRow(is_ts=False)
+            stage_ts = StageRow(is_ts=True)
+            session.add_all([stage1, stage2, stage_ts])
+            session.flush()
+
+            step = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
+            )
+            session.add(step)
+            session.commit()
+
+            assert step.stage1 is not None
+            assert step.stage1.id == stage1.id
+            assert step.stage2 is not None
+            assert step.stage2.id == stage2.id
+            assert step.stage_ts is not None
+            assert step.stage_ts.id == stage_ts.id
+
+
+class TestIdentityRow:
+    """Tests for IdentityRow model."""
+
+    def test_create_identity(self, database: Database) -> None:
+        """IdentityRow can be created with kind, algorithm, and value."""
+        with database.session() as session:
+            identity = IdentityRow(
+                kind="stereoisomer",
+                algorithm="rdkit inchi",
+                value="InChI=1S/CH4/h1H4",
+            )
+            session.add(identity)
+            session.commit()
+
+            assert identity.id is not None
+            assert identity.kind == "stereoisomer"
+            assert identity.algorithm == "rdkit inchi"
+            assert identity.value == "InChI=1S/CH4/h1H4"
+
+    def test_identity_unique_constraint(self, database: Database) -> None:
+        """IdentityRow enforces unique constraint on kind, algorithm, value."""
+        with database.session() as session:
+            identity1 = IdentityRow(
+                kind="stereoisomer",
+                algorithm="rdkit inchi",
+                value="InChI=1S/CH4/h1H4",
+            )
+            session.add(identity1)
+            session.flush()
+
+            # Try to create duplicate identity
+            identity2 = IdentityRow(
+                kind="stereoisomer",
+                algorithm="rdkit inchi",
+                value="InChI=1S/CH4/h1H4",
+            )
+            session.add(identity2)
+
+            with pytest.raises(IntegrityError):
+                session.commit()
+
+    def test_identity_relationships(self, database: Database) -> None:
+        """IdentityRow relationships are initially empty."""
+        with database.session() as session:
+            identity = IdentityRow(
+                kind="stereoisomer", algorithm="rdkit inchi", value="InChI=1S/CH4/h1H4"
+            )
+            session.add(identity)
+            session.commit()
+
+            assert identity.stationary_points == []
+            assert identity.identity_extras == []
+
+
+class TestIdentityExtraRow:
+    """Tests for IdentityExtraRow model."""
+
+    def test_create_identity_extra(self, database: Database) -> None:
+        """IdentityExtraRow can be created with attribute and value."""
+        with database.session() as session:
+            identity = IdentityRow(
+                kind="stereoisomer",
+                algorithm="rdkit inchi",
+                value="InChI=1S/CH4/h1H4",
+            )
+            session.add(identity)
+            session.flush()
+
+            extra = IdentityExtraRow(
+                identity_id=identity.id,
+                attribute="molecular_weight",
+                value="16.04",
+            )
+            session.add(extra)
+            session.commit()
+
+            assert extra.id is not None
+            assert extra.attribute == "molecular_weight"
+            assert extra.value == "16.04"
+
+    def test_identity_extra_relationship(self, database: Database) -> None:
+        """IdentityExtraRow.identity relationship works correctly."""
+        with database.session() as session:
+            identity = IdentityRow(
+                kind="stereoisomer", algorithm="rdkit inchi", value="InChI=1S/CH4/h1H4"
+            )
+            session.add(identity)
+            session.flush()
+
+            extra = IdentityExtraRow(
+                identity_id=identity.id, attribute="molecular_weight", value="16.04"
+            )
+            session.add(extra)
+            session.commit()
+
+            assert extra.identity is not None
+            assert extra.identity.id == identity.id
+            assert extra.identity.value == "InChI=1S/CH4/h1H4"
+
+
+class TestLinkModels:
+    """Tests for link/association table models."""
+
+    def test_calculation_geometry_link(self, database: Database) -> None:
+        """CalculationGeometryLink can be created with role."""
+        with database.session() as session:
+            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            link = CalculationGeometryLink(
+                calculation_id=calc.id, geometry_id=geom.id, role=Role.INPUT
+            )
+            session.add(link)
+            session.commit()
+
+            assert link.role == Role.INPUT
+            assert link.geometry_id == geom.id
+            assert link.calculation_id == calc.id
+
+    def test_geometry_trajectory_link(self, database: Database) -> None:
+        """GeometryTrajectoryLink can be created with index."""
+        with database.session() as session:
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            traj = TrajectoryRow(ndim=2)
+            session.add_all([geom, traj])
+            session.flush()
+
+            link = GeometryTrajectoryLink(
+                geometry_id=geom.id, trajectory_id=traj.id, index=[0, 0]
+            )
+            session.add(link)
+            session.commit()
+
+            assert link.index == [0, 0]
+
+    def test_calculation_trajectory_link(self, database: Database) -> None:
+        """CalculationTrajectoryLink can be created."""
+        with database.session() as session:
+            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            traj = TrajectoryRow(ndim=1)
+            session.add_all([calc, traj])
+            session.flush()
+
+            link = CalculationTrajectoryLink(
+                calculation_id=calc.id, trajectory_id=traj.id, role="output"
+            )
+            session.add(link)
+            session.commit()
+
+            assert link.role == "output"
+
+    def test_stage_stationary_link(self, database: Database) -> None:
+        """StageStationaryLink can be created."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            stat_pt = StationaryPointRow(geometry_id=geom.id, calculation_id=calc.id)
+            stage = StageRow(is_ts=False)
+            session.add_all([stat_pt, stage])
+            session.flush()
+
+            link = StageStationaryLink(stationary_id=stat_pt.id, stage_id=stage.id)
+            session.add(link)
+            session.commit()
+
+            assert link.stationary_id == stat_pt.id
+            assert link.stage_id == stage.id
+
+    def test_step_validation_link(self, database: Database) -> None:
+        """StepValidationLink can be created."""
+        with database.session() as session:
+            stage1 = StageRow(is_ts=False)
+            stage2 = StageRow(is_ts=False)
+            session.add_all([stage1, stage2])
+            session.flush()
+
+            step = StepRow(
+                stage_id1=stage1.id,
+                stage_id2=stage2.id,
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.flush()
+
+            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            validation = ValidationRow(calculation_id=calc.id, method="irc")
+            session.add(validation)
+            session.flush()
+
+            assert step.id is not None
+            assert validation.id is not None
+            link = StepValidationLink(step_id=step.id, validation_id=validation.id)
+            session.add(link)
+            session.commit()
+
+            assert link.step_id == step.id
+            assert link.validation_id == validation.id
+
+    def test_identity_stationary_link(self, database: Database) -> None:
+        """IdentityStationaryLink can be created."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            stat_pt = StationaryPointRow(geometry_id=geom.id, calculation_id=calc.id)
+            identity = IdentityRow(
+                kind="stereoisomer", algorithm="rdkit smiles", value="C"
+            )
+            session.add_all([stat_pt, identity])
+            session.flush()
+
+            assert stat_pt.id is not None
+            assert identity.id is not None
+            link = IdentityStationaryLink(
+                stationary_id=stat_pt.id, identity_id=identity.id
+            )
+            session.add(link)
+            session.commit()
+
+            assert link.stationary_id == stat_pt.id
+            assert link.identity_id == identity.id
+
+
+class TestModelIntegration:
+    """Integration tests for model interactions."""
+
+    def test_geometry_with_multiple_results(self, database: Database) -> None:
+        """Geometry can have multiple result types attached."""
+        with database.session() as session:
+            model = ModelRow(calc_type="frequency", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C", "H"],
+                coordinates=[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                charge=0,
+                spin=0,
+            )
+            session.add(geom)
+            session.flush()
+
+            energy = EnergyRow(
+                geometry_id=geom.id, calculation_id=calc.id, value=-37.8422
+            )
+            gradient = GradientRow(
+                geometry_id=geom.id,
+                calculation_id=calc.id,
+                value=np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            )
+            hessian = HessianRow(
+                geometry_id=geom.id,
+                calculation_id=calc.id,
+                value=np.eye(6, dtype=np.float32),
+            )
+            session.add_all([energy, gradient, hessian])
+            session.commit()
+
+            assert len(geom.energies) == 1
+            assert len(geom.gradients) == 1
+            assert len(geom.hessians) == 1
+
+    def test_calculation_with_multiple_geometries(self, database: Database) -> None:
+        """Calculation can be linked to multiple geometries."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom1 = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            geom2 = GeometryRow(
+                symbols=["C"], coordinates=[[0.1, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add_all([geom1, geom2])
+            session.flush()
+
+            link1 = CalculationGeometryLink(
+                calculation_id=calc.id, geometry_id=geom1.id, role=Role.INPUT
+            )
+            link2 = CalculationGeometryLink(
+                calculation_id=calc.id, geometry_id=geom2.id, role=Role.OUTPUT
+            )
+            session.add_all([link1, link2])
+            session.commit()
+
+            assert len(calc.geometry_links) == 2  # noqa: PLR2004
+
+    def test_stationary_point_with_identity(self, database: Database) -> None:
+        """Stationary point can be linked to an identity."""
+        with database.session() as session:
+            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(model_id=model.id)
+            session.add(calc)
+            session.flush()
+
+            geom = GeometryRow(
+                symbols=["C"], coordinates=[[0.0, 0.0, 0.0]], charge=0, spin=0
+            )
+            session.add(geom)
+            session.flush()
+
+            stat_pt = StationaryPointRow(geometry_id=geom.id, calculation_id=calc.id)
+            identity = IdentityRow(
+                kind="stereoisomer", algorithm="rdkit smiles", value="C"
+            )
+            session.add_all([stat_pt, identity])
+            session.flush()
+
+            assert stat_pt.id is not None
+            assert identity.id is not None
+            link = IdentityStationaryLink(
+                stationary_id=stat_pt.id, identity_id=identity.id
+            )
+            session.add(link)
+            session.commit()
+
+            # Test bidirectional relationship
+            # Note: stat_pt will have auto-generated identities from event listener
+            # plus the manually linked one
+            assert len(stat_pt.identities) >= 2  # noqa: PLR2004
+            assert identity.id in [i.id for i in stat_pt.identities]
+            assert len(identity.stationary_points) == 1
+            assert identity.stationary_points[0].id == stat_pt.id

@@ -1,26 +1,18 @@
-"""SQLite database connection and session management."""
+"""SQLite database connection management."""
 
 import json
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
 from functools import partial
 from pathlib import Path
-from types import TracebackType
-from typing import Self
 
-from sqlalchemy import Select, create_engine, event
-from sqlalchemy import select as sa_select
-from sqlalchemy.exc import MultipleResultsFound, NoResultFound
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
+from sqlmodel import SQLModel
 
 # Ensure all modules are loaded with the database
-from .events import *  # noqa: F403
+from . import events  # noqa: F401
 from .models import *  # noqa: F403
-from .models import SQLModel
 
-type SelectStatement[T] = Select[tuple[T]]
-
-__all__ = ["Database", "Select", "SelectStatement"]
+__all__ = ["Database"]
 
 
 class Database:
@@ -33,8 +25,6 @@ class Database:
         Path to SQLite database file.
     engine
         SQLAlchemy engine instance.
-    _session
-        Persistent database session.
     """
 
     def __init__(self, path: str | Path, *, echo: bool = False) -> None:
@@ -70,146 +60,18 @@ class Database:
             cursor.close()
 
         SQLModel.metadata.create_all(self.engine)
-        self._session: Session = Session(self.engine)
 
-    @contextmanager
-    def session(self) -> Iterator[Session]:
-        """Yield the persistent database session.
+    def session(self) -> Session:
+        """Return a fresh `Session` bound to this database's engine.
 
         Note
         ----
-        This yields the single, long-lived `Session` created in `__init__`,
-        not a fresh session per call — rows returned from queries stay
-        attached, so lazy-loaded relationships keep working after the `with`
-        block exits. As a result, a `Database` instance is not safe for
-        concurrent use by multiple threads: `check_same_thread=False` only
-        allows the underlying DBAPI connection to be used from a different
-        thread than it was created on (e.g. a single background worker), it
-        does not make the `Session` itself thread-safe.
+        A new `Session` is created per call; use it as a context manager
+        (`with database.session() as session: ...`) to close it on exit.
+        Nothing is committed automatically — call `session.commit()` explicitly.
         """
-        try:
-            yield self._session
-        except Exception:
-            self._session.rollback()
-            raise
-
-    def add[RowT: SQLModel](self, row: RowT) -> None:
-        """Add row to session.
-
-        Note
-        ----
-        The row is not validated or written to the database until the next `flush()` or
-        `commit()`. Integrity/shape errors (unique constraints, the shape event
-        listeners) raise there, which may be far removed from this call.
-        """
-        with self.session() as session:
-            session.add(row)
-
-    def add_all[RowT: SQLModel](self, rows: Iterable[RowT]) -> None:
-        """Add multiple rows to session.
-
-        Note
-        ----
-        Bulk `add()`. Same staging-only caveat applies.
-        """
-        with self.session() as session:
-            session.add_all(rows)
-
-    def merge[RowT: SQLModel](self, row: RowT) -> RowT:
-        """Merge row into current session and commit, returning the merged row."""
-        with self.session() as session:
-            merged = session.merge(row)
-            session.commit()
-            return merged
-
-    def flush(self) -> None:
-        """Flush pending changes to the database without committing.
-
-        Note
-        ----
-        Unlike `commit()`, this doesn't trigger SQLAlchemy's default `expire_on_commit`
-        behavior, so an already-loaded object whose row was removed by a DB-level
-        `ondelete="CASCADE"` during this flush would be read back stale. `expire_all()`
-        forces those objects to reload (or raise) on next access instead.
-        """
-        with self.session() as session:
-            session.flush()
-            session.expire_all()
-
-    def commit(self) -> None:
-        """Commit database session."""
-        with self.session() as session:
-            session.commit()
-
-    def delete[RowT: SQLModel](self, row: RowT) -> None:
-        """Delete row from database."""
-        with self.session() as session:
-            session.delete(row)
-            session.commit()
-
-    def get_or_none[RowT: SQLModel](
-        self, model: type[RowT], row_id: int
-    ) -> RowT | None:
-        """Get row from database, returning `None` instead of raising on a miss."""
-        with self.session() as session:
-            return session.get(model, row_id)
-
-    def get[RowT: SQLModel](self, model: type[RowT], row_id: int) -> RowT:
-        """Get row from database."""
-        row = self.get_or_none(model, row_id)
-        if row is not None:
-            return row
-
-        msg = f"{model} with {row_id = } not found."
-        raise LookupError(msg)
-
-    def exec_first[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> RowT | None:
-        """Return the first match to a statement."""
-        with self.session() as session:
-            return session.scalars(stmt).first()
-
-    def exec_one[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> RowT:
-        """Return the single match to a statement."""
-        with self.session() as session:
-            try:
-                return session.scalars(stmt).one()
-            except NoResultFound as exc:
-                msg = f"No row found matching {stmt}."
-                raise LookupError(msg) from exc
-            except MultipleResultsFound as exc:
-                msg = f"Multiple rows found matching {stmt}."
-                raise LookupError(msg) from exc
-
-    def exec_all[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> list[RowT]:
-        """Return all matches to a statement."""
-        with self.session() as session:
-            return list(session.scalars(stmt).all())
-
-    def exists[RowT: SQLModel](self, stmt: SelectStatement[RowT]) -> bool:
-        """Return whether any row matches a statement.
-
-        Executes as a single `EXISTS` subquery instead of `exec_first`, so a matching
-        row is never materialized.
-        """
-        with self.session() as session:
-            return bool(session.scalar(sa_select(stmt.exists())))
+        return Session(self.engine)
 
     def close(self) -> None:
         """Close the database connection."""
         self.engine.dispose()
-
-    def __enter__(self) -> Self:
-        """Enter a `with Database(...) as db:` block."""
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: object,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Roll back on exception, then close the database connection."""
-        del exc_value, traceback
-        if exc_type is not None:
-            self._session.rollback()
-        self.close()
