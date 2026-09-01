@@ -70,13 +70,13 @@ with db.session() as session:
     session.flush()
 
     # Calculation model used to locate all three stationary points.
-    model = ModelRow(calc_type="opt", program="psi4", method="b3lyp", basis="6-31g*")
+    model = ModelRow(program="psi4", method="b3lyp", basis="6-31g*")
     session.add(model)
     session.flush()
 
-    calc_reactant = CalculationRow(model_id=model.id)
-    calc_ts = CalculationRow(model_id=model.id)
-    calc_product = CalculationRow(model_id=model.id)
+    calc_reactant = CalculationRow(model_id=model.id, calc_type="opt")
+    calc_ts = CalculationRow(model_id=model.id, calc_type="opt")
+    calc_product = CalculationRow(model_id=model.id, calc_type="opt")
     session.add_all([calc_reactant, calc_ts, calc_product])
     session.flush()
 
@@ -169,13 +169,11 @@ with db.session() as session:
 
     # Validate the step with an IRC calculation confirming it connects the
     # reactant and product minima, then link the validation to the step.
-    irc_model = ModelRow(
-        calc_type="irc", program="psi4", method="b3lyp", basis="6-31g*"
-    )
+    irc_model = ModelRow(program="psi4", method="b3lyp", basis="6-31g*")
     session.add(irc_model)
     session.flush()
 
-    irc_calc = CalculationRow(model_id=irc_model.id)
+    irc_calc = CalculationRow(model_id=irc_model.id, calc_type="irc")
     session.add(irc_calc)
     session.flush()
 

@@ -20,7 +20,12 @@ from sqlmodel import (
 )
 from sqlmodel.main import SQLModelConfig
 
-from .types import CompressedArrayTypeDecorator, Role, _fk_field
+from .types import (
+    CompressedArrayTypeDecorator,
+    CompressedJSONTypeDecorator,
+    Role,
+    _fk_field,
+)
 
 
 # 0. Link rows
@@ -347,8 +352,6 @@ class ModelRow(SQLModel, table=True):
     ----------
     id
         Primary key.
-    calc_type
-        Type of calculation (energy, gradient, hessian, etc.).
     program
         Quantum chemistry program used (psi4, ORCA, ...)
     program_version
@@ -366,7 +369,6 @@ class ModelRow(SQLModel, table=True):
     __tablename__ = "model"
 
     id: int | None = Field(default=None, primary_key=True)
-    calc_type: str
     program: str
     program_version: str | None = None
     method: str
@@ -387,6 +389,8 @@ class CalculationRow(SQLModel, table=True):
         Primary key.
     model_id
         Foreign key to the model used for this calculation.
+    calc_type
+        Type of calculation (energy, gradient, hessian, etc.).
     input_provenance
         Metadata describing how the input was generated.
     output_provenance
@@ -419,6 +423,7 @@ class CalculationRow(SQLModel, table=True):
         nullable=False,
         index=True,
     )
+    calc_type: str
     input_provenance: dict[str, Any] | None = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
@@ -586,8 +591,8 @@ class StationaryPointRow(SQLModel, table=True):
         Hessian index (0 for minima, 1 for first-order saddle points).
     is_pseudo
         Whether this point is not a true stationary point (e.g. constrained).
-    is_valid
-        Whether `order` agrees with the consensus Hessian order of its geometry.
+    is_validated
+        Whether this stationary point has been validated (e.g., by Hessian calculation).
     geometry
         Geometry defining the coordinates of this point.
     calculation
@@ -605,7 +610,7 @@ class StationaryPointRow(SQLModel, table=True):
     calculation_id: int | None = _fk_field("calculation.id")
     order: int = 0
     is_pseudo: bool = False
-    is_valid: bool = False
+    is_validated: bool = False
 
     geometry: "GeometryRow" = Relationship(back_populates="stationary_points")
     calculation: "CalculationRow" = Relationship(back_populates="stationary_points")
@@ -773,6 +778,9 @@ class IdentityRow(SQLModel, Identity, table=True):
         back_populates="identities", link_model=IdentityStationaryLink
     )
     identity_extras: list["IdentityExtraRow"] = Relationship(back_populates="identity")
+    algorithm_cache: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(CompressedJSONTypeDecorator())
+    )
 
 
 class IdentityExtraRow(SQLModel, table=True):

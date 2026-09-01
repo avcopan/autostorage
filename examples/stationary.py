@@ -55,7 +55,6 @@ with db.session() as session:
 
     # Create a calculation model
     model = ModelRow(
-        calc_type="OPT",
         program="psi4",
         method="b3lyp",
         basis="6-31g*",
@@ -64,8 +63,8 @@ with db.session() as session:
     session.flush()
 
     # Create calculations that identified the stationary points
-    calc1 = CalculationRow(model_id=model.id)
-    calc2 = CalculationRow(model_id=model.id)
+    calc1 = CalculationRow(model_id=model.id, calc_type="OPT")
+    calc2 = CalculationRow(model_id=model.id, calc_type="OPT")
     session.add_all([calc1, calc2])
     session.flush()
 
@@ -157,14 +156,14 @@ with db.session() as session:
         calculation_id=calc1.id,
         order=0,
         is_pseudo=False,
-        is_valid=True,
+        is_validated=True,
     )
     stat2 = StationaryPointRow(
         geometry_id=geom2.id,
         calculation_id=calc2.id,
         order=0,
         is_pseudo=False,
-        is_valid=True,
+        is_validated=True,
     )
     session.add_all([stat1, stat2])
     session.flush()

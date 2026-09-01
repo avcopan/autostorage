@@ -129,7 +129,7 @@ def verify_valid_stationary_has_hessian(
         if not isinstance(obj, StationaryPointRow):
             continue
 
-        if not obj.is_valid:
+        if not obj.is_validated:
             continue
 
         if obj.geometry_id is None:
