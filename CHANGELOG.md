@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [0.0.13] - 2026-08-31
 ### Added
 
 - **`.claude/CLAUDE.md`**: Project-level guidance for Claude Code, documenting module architecture, layering rules, Pixi task commands, and autostorage-specific conventions.
