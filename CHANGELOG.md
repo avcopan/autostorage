@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+
+- **`.claude/CLAUDE.md`**: Project-level guidance for Claude Code, documenting module architecture, layering rules, Pixi task commands, and autostorage-specific conventions.
+- **`docs/source/models.md`**: Dedicated documentation page for the row models and their relationships.
+- **Schema diagrams** (`schema/`): Added Pintora source files and rendered SVG/PNG diagrams for both simplified and full database schemas.
+- **`examples/stationary.py`**: Example demonstrating stationary points, stages, and steps with H2O geometries.
+- **`examples/scan.py`**: Example showing PES scan workflow with trajectory data.
+- **`examples/transition.py`**: Example illustrating transition state and reaction pathway modeling.
+- **`tests/test_events.py`**: Comprehensive test suite for SQLAlchemy ORM event listeners.
+- **Top-level exports**: Added `CalculationTrajectoryLink`, `GeometryTrajectoryLink`, and `events` module to `autostorage.__all__`.
+
+### Changed
+
+- **Module consolidation**: Collapsed `src/autostorage/models/` directory (with separate `calc.py`, `data.py`, `geom.py`, `link.py`, `rxn.py`, `traj.py` files) into a single `src/autostorage/models.py` file — all row models, link tables, and helpers now live in one module, eliminating circular import complexity while maintaining logical organization via internal sections (link tables, existential data, stationary points, reaction network, identities).
+- **Documentation reorganization**: Streamlined Sphinx docs — consolidated data model, development, and events pages into focused `models.md` and updated `database.md`; refreshed `index.md` and `quickstart.md` to reflect current architecture.
+- **Examples refactor**: Replaced single `stationary_point.py` example with three focused examples (`stationary.py`, `scan.py`, `transition.py`), each demonstrating a distinct workflow pattern.
+- **Test simplification**: Removed `tests/conftest.py` and test data files (`tests/data/*.xyz`, `*.gz`) — tests now use inline synthetic data instead of external fixtures.
+
+### Removed
+
+- **Alembic migrations** (`migrations/`, `alembic.ini`, `tests/test_migrations.py`, `pixi run migrate`): Removed for now; `alembic` remains a dev dependency for when migrations are reintroduced. Schema for fresh/in-memory `Database` instances is unaffected, still built via `create_all()`.
+- **`src/autostorage/exc.py`**: Custom exception classes (`DataIntegrityError`, `ResultShapeError`) removed — validation errors now use standard Python exceptions or SQLAlchemy's built-in constraint violations.
+- **`CalcType` and `CalcStatus` enums**: Removed from `types.py` and top-level exports — calculation type/status classification deferred to workflow layer or removed entirely.
+- **Documentation files**: Deleted `docs/source/data-model.md`, `docs/source/development.md`, and `docs/source/events.md` (content consolidated into `models.md` and other updated docs).
+- **`examples/stationary_point.py`**: Superseded by the three new focused examples.
 
 ## [0.0.12] - 2026-07-23
 ### Added

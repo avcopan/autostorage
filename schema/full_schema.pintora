@@ -1,0 +1,149 @@
+erDiagram
+    @param fill #FFFFFF
+    @param stroke #000000
+    @param labelBackground #FFFFFF
+    @param fontSize 24
+    @param fontFamily "Georgia"
+    @param layoutDirection "LR"
+    @param entityPaddingX 30
+    @param entityPaddingY 30
+    @param ranksep 300
+    @param edgesep 50
+
+    MODEL {
+    int id PK
+    string program UK
+    string program_version UK
+    string method UK
+    string basis UK
+    }
+    CALCULATION {
+    int id PK
+    int model_id FK
+    enum calc_type
+    json input_provenance
+    json output_provenance
+    }
+    GEOMETRY {
+    int id PK
+    json symbols
+    json coordinates
+    int charge
+    int spin
+    }
+    CALCULATION_GEOMETRY_LINK {
+    int geometry_id FK
+    int calculation_id FK
+    enum role
+    }
+    TRAJECTORY {
+    int id PK
+    }
+    CALCULATION_TRAJECTORY_LINK {
+    int trajectory_id FK
+    int calculation_id FK
+    enum role
+    }
+    TRAJECTORY_GEOMETRY_LINK {
+        int geometry_id FK
+        int calculation_id FK
+        json index
+    }
+    ENERGY {
+    int id PK
+    int geometry_id FK
+    int calculation_id FK
+    int value
+    }
+    GRADIENT {
+    int id PK
+    int geometry_id FK
+    int calculation_id FK
+    json value
+    }
+    HESSIAN {
+    int id PK
+    int geometry_id FK
+    int calculation_id FK
+    json value
+    }
+    STATIONARY_POINT {
+    int id PK
+    int geometry_id FK
+    int calculation_id FK
+    int order
+    bool is_pseudo
+    bool is_valid
+    }
+    IDENTITY {
+    int id PK
+    string kind
+    string algorithm
+    string value
+    }
+    IDENTITY_EXTRA {
+    int id PK
+    int identity_id FK
+    string attribute
+    string value
+    }
+    STATIONARY_IDENTITY_LINK {
+    int identity_id FK
+    int stationary_id FK
+    }
+    STAGE {
+    int id PK
+    bool is_ts
+    }
+    STATIONARY_STAGE_LINK {
+    int stationary_id FK
+    int stage_id FK
+    }
+    STEP {
+    int id PK
+    int stage_id1 FK
+    int stage_id2 FK
+    int stage_id_ts FK
+    bool is_barrierless
+    }
+    VALIDATION {
+    int id PK
+    int calculation_id FK
+    str method
+    json extras
+    }
+    STEP_VALIDATION_LINK {
+    int step_id FK
+    int validation_id FK
+    }
+    %%Calculation
+    MODEL }o--|| CALCULATION : specifies
+    CALCULATION_GEOMETRY_LINK }o--|| CALCULATION : links
+    CALCULATION_TRAJECTORY_LINK }o--|| CALCULATION : links
+    CALCULATION ||..o{ ENERGY : produces
+    CALCULATION ||..o{ GRADIENT : produces
+    CALCULATION ||..o{ HESSIAN : produces
+    %%Geometry
+    CALCULATION_GEOMETRY_LINK }o--|| GEOMETRY : links
+    TRAJECTORY_GEOMETRY_LINK }o--|| GEOMETRY : links
+    ENERGY }o..|| GEOMETRY : "evaluated from"
+    GRADIENT }o..|| GEOMETRY : "evaluated from"
+    HESSIAN }o..|| GEOMETRY : "evaluated from"
+    %%Trajectory
+    CALCULATION_TRAJECTORY_LINK }o--|| TRAJECTORY : "links"
+    TRAJECTORY_GEOMETRY_LINK }o--|| TRAJECTORY : "links"
+    %%Stationary
+    STATIONARY_POINT }o..|| GEOMETRY : "has structure"
+    STATIONARY_IDENTITY_LINK }o--|| STATIONARY_POINT : "links"
+    STATIONARY_STAGE_LINK }o--|| STATIONARY_POINT : "links"
+    %%Identity
+    STATIONARY_IDENTITY_LINK }o--|| IDENTITY : "links"
+    IDENTITY ||--o{ IDENTITY_EXTRA : "has"
+    %%Stage
+    STATIONARY_STAGE_LINK }o--|| STAGE : "links"
+    STAGE ||..o{ STEP : "node of"
+    %%Step
+    STEP_VALIDATION_LINK }o--|| STEP : "links"
+    %%Validation
+    STEP_VALIDATION_LINK }o--|| VALIDATION : "links"
+    CALCULATION ||--o{ VALIDATION : "provides"

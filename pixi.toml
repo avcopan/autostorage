@@ -6,7 +6,7 @@ preview = ["pixi-build"]
 [dependencies]
 python = ">=3.12,<3.14"
 autostorage = { path = "." }
-automol = "==0.0.19"  # local:false
+automol = "==0.0.22"  # local:false
 # automol = { path = "../automol" }  # local:true
 matplotlib-base = ">=3.8"
 
@@ -70,8 +70,6 @@ lint = "ruff check . --fix"
 types = "ty check"
 imports = "lint-imports"
 test = "pytest"
-# Apply database migrations (set AUTOSTORAGE_DATABASE_URL to target a specific DB)
-migrate = "alembic upgrade head"
 # Run pre-commit hooks (see lefthook.yaml)
 pre-commit = "lefthook run pre-commit --all-files"
 local-pre-commit = "lefthook run local-pre-commit --all-files"
