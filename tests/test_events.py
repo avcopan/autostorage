@@ -52,7 +52,7 @@ def make_model_gradient() -> Callable[[], ModelRow]:
     """Create factory for gradient calculation ModelRow."""
 
     def _make() -> ModelRow:
-        return ModelRow(calc_type="gradient", program="psi4", method="B3LYP")
+        return ModelRow(program="psi4", method="B3LYP")
 
     return _make
 
@@ -62,7 +62,7 @@ def make_model_frequency() -> Callable[[], ModelRow]:
     """Create factory for frequency calculation ModelRow."""
 
     def _make() -> ModelRow:
-        return ModelRow(calc_type="frequency", program="psi4", method="B3LYP")
+        return ModelRow(program="psi4", method="B3LYP")
 
     return _make
 
@@ -72,7 +72,7 @@ def make_model_opt() -> Callable[[], ModelRow]:
     """Create factory for optimization calculation ModelRow."""
 
     def _make() -> ModelRow:
-        return ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+        return ModelRow(program="psi4", method="B3LYP")
 
     return _make
 
@@ -83,7 +83,10 @@ def make_calculation() -> Callable[[int], CalculationRow]:
 
     def _make(model_id: int) -> CalculationRow:
         return CalculationRow(
-            model_id=model_id, input_provenance={}, output_provenance={}
+            calc_type="opt",
+            model_id=model_id,
+            input_provenance={},
+            output_provenance={},
         )
 
     return _make
@@ -414,7 +417,10 @@ class TestVerifyGradientShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="gradient",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -449,7 +455,10 @@ class TestVerifyGradientShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="gradient",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -483,7 +492,10 @@ class TestVerifyGradientShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="gradient",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -521,7 +533,10 @@ class TestVerifyGradientShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="gradient",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -556,7 +571,10 @@ class TestVerifyGradientShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="gradient",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -590,7 +608,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -623,7 +644,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -655,7 +679,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -687,7 +714,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -719,7 +749,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -751,7 +784,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -787,7 +823,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -819,7 +858,10 @@ class TestVerifyHessianShape:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1020,7 +1062,10 @@ class TestAddInchiIdentity:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1056,10 +1101,16 @@ class TestAddInchiIdentity:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1119,10 +1170,16 @@ class TestAddInchiIdentity:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1173,7 +1230,10 @@ class TestAddSmilesExtras:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1227,10 +1287,16 @@ class TestAddSmilesExtras:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1298,10 +1364,16 @@ class TestAddSmilesExtras:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1377,7 +1449,10 @@ class TestAddHillExtras:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1433,10 +1508,16 @@ class TestAddHillExtras:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1506,10 +1587,16 @@ class TestAddHillExtras:
             session.flush()
 
             calc1 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             calc2 = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add_all([calc1, calc2])
             session.flush()
@@ -1594,7 +1681,10 @@ class TestVerifyValidStationaryHasHessian:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1614,12 +1704,12 @@ class TestVerifyValidStationaryHasHessian:
                 geometry_id=geom.id,
                 calculation_id=calc.id,
                 order=0,
-                is_valid=True,
+                is_validated=True,
             )
             session.add(stat)
             session.flush()
 
-            assert stat.is_valid is True
+            assert stat.is_validated is True
             assert len(geom.hessians) == 1
 
     def test_valid_stationary_without_hessian_rejected(
@@ -1636,7 +1726,10 @@ class TestVerifyValidStationaryHasHessian:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1646,7 +1739,7 @@ class TestVerifyValidStationaryHasHessian:
                 geometry_id=geom.id,
                 calculation_id=calc.id,
                 order=0,
-                is_valid=True,
+                is_validated=True,
             )
             session.add(stat)
 
@@ -1667,30 +1760,33 @@ class TestVerifyValidStationaryHasHessian:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
 
-            # Create stationary point with is_valid=False - should succeed
+            # Create stationary point with is_validated=False - should succeed
             stat = StationaryPointRow(
                 geometry_id=geom.id,
                 calculation_id=calc.id,
                 order=0,
-                is_valid=False,
+                is_validated=False,
             )
             session.add(stat)
             session.flush()
 
-            assert stat.is_valid is False
+            assert stat.is_validated is False
 
-    def test_valid_stationary_update_to_valid_without_hessian_rejected(
+    def test_valid_stationary_update_to_validated_without_hessian_rejected(
         self,
         database: Database,
         make_model_opt: Callable[[], ModelRow],
         make_geometry_2atom: Callable[[], GeometryRow],
     ) -> None:
-        """Updating stationary to valid without Hessian is rejected."""
+        """Updating stationary to validated without Hessian is rejected."""
         with database.session() as session:
             model = make_model_opt()
             geom = make_geometry_2atom()
@@ -1698,7 +1794,10 @@ class TestVerifyValidStationaryHasHessian:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
@@ -1708,24 +1807,24 @@ class TestVerifyValidStationaryHasHessian:
                 geometry_id=geom.id,
                 calculation_id=calc.id,
                 order=0,
-                is_valid=False,
+                is_validated=False,
             )
             session.add(stat)
             session.flush()
 
-            # Try to update to valid without Hessian - should fail
-            stat.is_valid = True
+            # Try to update to validated without Hessian - should fail
+            stat.is_validated = True
 
             with pytest.raises(ValueError, match="cannot be marked as valid"):
                 session.flush()
 
-    def test_update_to_valid_with_hessian_accepted(
+    def test_update_to_validated_with_hessian_accepted(
         self,
         database: Database,
         make_model_frequency: Callable[[], ModelRow],
         make_geometry_2atom: Callable[[], GeometryRow],
     ) -> None:
-        """Updating stationary to valid with Hessian is accepted."""
+        """Updating stationary to validated with Hessian is accepted."""
         with database.session() as session:
             model = make_model_frequency()
             geom = make_geometry_2atom()
@@ -1733,17 +1832,20 @@ class TestVerifyValidStationaryHasHessian:
             session.flush()
 
             calc = CalculationRow(
-                model_id=model.id, input_provenance={}, output_provenance={}
+                calc_type="frequency",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
             )
             session.add(calc)
             session.flush()
 
-            # Create invalid stationary point
+            # Create non-validated stationary point
             stat = StationaryPointRow(
                 geometry_id=geom.id,
                 calculation_id=calc.id,
                 order=0,
-                is_valid=False,
+                is_validated=False,
             )
             session.add(stat)
             session.flush()
@@ -1758,8 +1860,8 @@ class TestVerifyValidStationaryHasHessian:
             session.add(hessian)
             session.flush()
 
-            # Update to valid with Hessian present - should succeed
-            stat.is_valid = True
+            # Update to validated with Hessian present - should succeed
+            stat.is_validated = True
             session.flush()
 
-            assert stat.is_valid is True
+            assert stat.is_validated is True

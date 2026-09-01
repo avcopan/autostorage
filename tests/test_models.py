@@ -170,12 +170,11 @@ class TestModelRow:
     def test_create_model_minimal(self, database: Database) -> None:
         """ModelRow can be created with minimal required fields."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.commit()
 
             assert model.id is not None
-            assert model.calc_type == "energy"
             assert model.program == "psi4"
             assert model.method == "B3LYP"
             assert model.basis is None
@@ -186,7 +185,6 @@ class TestModelRow:
         """ModelRow can be created with all fields specified."""
         with database.session() as session:
             model = ModelRow(
-                calc_type="gradient",
                 program="orca",
                 program_version="5.0.3",
                 method="MP2",
@@ -204,7 +202,7 @@ class TestModelRow:
     def test_model_keywords_default_empty_dict(self, database: Database) -> None:
         """ModelRow keywords default to empty dict."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="gaussian", method="HF")
+            model = ModelRow(program="gaussian", method="HF")
             session.add(model)
             session.commit()
 
@@ -217,12 +215,13 @@ class TestCalculationRow:
     def test_create_calculation(self, database: Database) -> None:
         """CalculationRow can be created with a model reference."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
             calc = CalculationRow(
                 model_id=model.id,
+                calc_type="energy",
                 input_provenance={"source": "test"},
                 output_provenance={"status": "success"},
             )
@@ -231,17 +230,18 @@ class TestCalculationRow:
 
             assert calc.id is not None
             assert calc.model_id == model.id
+            assert calc.calc_type == "energy"
             assert calc.input_provenance == {"source": "test"}
             assert calc.output_provenance == {"status": "success"}
 
     def test_calculation_relationships(self, database: Database) -> None:
         """CalculationRow relationships are initially empty."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="energy")
             session.add(calc)
             session.commit()
 
@@ -256,11 +256,11 @@ class TestCalculationRow:
     def test_calculation_model_relationship(self, database: Database) -> None:
         """CalculationRow.model relationship works correctly."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="energy")
             session.add(calc)
             session.commit()
 
@@ -271,7 +271,7 @@ class TestCalculationRow:
     def test_calculation_requires_model(self, database: Database) -> None:
         """CalculationRow requires a valid model_id."""
         with database.session() as session:
-            calc = CalculationRow(model_id=9999)
+            calc = CalculationRow(model_id=9999, calc_type="energy")
             session.add(calc)
 
             with pytest.raises(IntegrityError):
@@ -284,11 +284,11 @@ class TestResultRows:
     def test_create_energy_row(self, database: Database) -> None:
         """EnergyRow can be created with geometry and calculation."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="energy")
             session.add(calc)
             session.flush()
 
@@ -312,11 +312,11 @@ class TestResultRows:
     def test_create_gradient_row(self, database: Database) -> None:
         """GradientRow can be created with numpy array."""
         with database.session() as session:
-            model = ModelRow(calc_type="gradient", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="gradient")
             session.add(calc)
             session.flush()
 
@@ -342,11 +342,11 @@ class TestResultRows:
     def test_create_hessian_row(self, database: Database) -> None:
         """HessianRow can be created with 2D numpy array."""
         with database.session() as session:
-            model = ModelRow(calc_type="frequency", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="frequency")
             session.add(calc)
             session.flush()
 
@@ -372,11 +372,11 @@ class TestResultRows:
     def test_result_relationships(self, database: Database) -> None:
         """Result rows have correct relationships to geometry and calculation."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="energy")
             session.add(calc)
             session.flush()
 
@@ -404,11 +404,11 @@ class TestValidationRow:
     def test_create_validation(self, database: Database) -> None:
         """ValidationRow can be created with calculation reference."""
         with database.session() as session:
-            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="irc")
             session.add(calc)
             session.flush()
 
@@ -427,11 +427,11 @@ class TestValidationRow:
     def test_validation_extras_default(self, database: Database) -> None:
         """ValidationRow extras default to empty dict."""
         with database.session() as session:
-            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="irc")
             session.add(calc)
             session.flush()
 
@@ -448,11 +448,11 @@ class TestStationaryPointRow:
     def test_create_stationary_point(self, database: Database) -> None:
         """StationaryPointRow can be created with default values."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 
@@ -469,16 +469,16 @@ class TestStationaryPointRow:
             assert stat_pt.id is not None
             assert stat_pt.order == 0
             assert stat_pt.is_pseudo is False
-            assert stat_pt.is_valid is False
+            assert stat_pt.is_validated is False
 
     def test_create_transition_state(self, database: Database) -> None:
         """StationaryPointRow can represent a transition state (order=1)."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt_ts", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt_ts")
             session.add(calc)
             session.flush()
 
@@ -499,22 +499,22 @@ class TestStationaryPointRow:
             session.flush()
 
             stat_pt = StationaryPointRow(
-                geometry_id=geom.id, calculation_id=calc.id, order=1, is_valid=True
+                geometry_id=geom.id, calculation_id=calc.id, order=1, is_validated=True
             )
             session.add(stat_pt)
             session.commit()
 
             assert stat_pt.order == 1
-            assert stat_pt.is_valid is True
+            assert stat_pt.is_validated is True
 
     def test_stationary_point_relationships(self, database: Database) -> None:
         """StationaryPointRow relationships work correctly."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 
@@ -779,11 +779,11 @@ class TestLinkModels:
     def test_calculation_geometry_link(self, database: Database) -> None:
         """CalculationGeometryLink can be created with role."""
         with database.session() as session:
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="energy")
             session.add(calc)
             session.flush()
 
@@ -824,11 +824,11 @@ class TestLinkModels:
     def test_calculation_trajectory_link(self, database: Database) -> None:
         """CalculationTrajectoryLink can be created."""
         with database.session() as session:
-            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="irc")
             traj = TrajectoryRow(ndim=1)
             session.add_all([calc, traj])
             session.flush()
@@ -844,11 +844,11 @@ class TestLinkModels:
     def test_stage_stationary_link(self, database: Database) -> None:
         """StageStationaryLink can be created."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 
@@ -886,11 +886,11 @@ class TestLinkModels:
             session.add(step)
             session.flush()
 
-            model = ModelRow(calc_type="irc", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="irc")
             session.add(calc)
             session.flush()
 
@@ -910,11 +910,11 @@ class TestLinkModels:
     def test_identity_stationary_link(self, database: Database) -> None:
         """IdentityStationaryLink can be created."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 
@@ -949,11 +949,11 @@ class TestModelIntegration:
     def test_geometry_with_multiple_results(self, database: Database) -> None:
         """Geometry can have multiple result types attached."""
         with database.session() as session:
-            model = ModelRow(calc_type="frequency", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="frequency")
             session.add(calc)
             session.flush()
 
@@ -989,11 +989,11 @@ class TestModelIntegration:
     def test_calculation_with_multiple_geometries(self, database: Database) -> None:
         """Calculation can be linked to multiple geometries."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 
@@ -1020,11 +1020,11 @@ class TestModelIntegration:
     def test_stationary_point_with_identity(self, database: Database) -> None:
         """Stationary point can be linked to an identity."""
         with database.session() as session:
-            model = ModelRow(calc_type="opt", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 
-            calc = CalculationRow(model_id=model.id)
+            calc = CalculationRow(model_id=model.id, calc_type="opt")
             session.add(calc)
             session.flush()
 

@@ -166,7 +166,7 @@ class TestDatabaseIntegration:
         """JSON serializer sorts keys for consistent output."""
         with database.session() as session:
             # Create a model first (required for CalculationRow)
-            model = ModelRow(calc_type="energy", program="psi4", method="B3LYP")
+            model = ModelRow(program="psi4", method="B3LYP")
             session.add(model)
             session.flush()
 

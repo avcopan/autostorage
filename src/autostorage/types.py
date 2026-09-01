@@ -1,5 +1,6 @@
 """Autostorage types."""
 
+import json
 import zlib
 from enum import StrEnum
 from io import BytesIO
@@ -10,7 +11,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field
 
-__all__ = ["CompressedArrayTypeDecorator", "Role"]
+__all__ = ["CompressedArrayTypeDecorator", "CompressedJSONTypeDecorator", "Role"]
 
 
 def _fk_field(target: str, *, nullable: bool = False, index: bool = True) -> Any:  # noqa: ANN401
@@ -55,6 +56,31 @@ class CompressedArrayTypeDecorator(TypeDecorator):
         if value is None:
             return None
         return np.load(BytesIO(zlib.decompress(value)), allow_pickle=False)
+
+
+class CompressedJSONTypeDecorator(TypeDecorator):
+    """Stores a JSON dict as zlib-compressed binary data in the DB."""
+
+    impl = LargeBinary
+    cache_ok = True
+
+    def process_bind_param(self, value: Any, dialect: Any) -> bytes | None:  # noqa: ANN401, ARG002
+        """Convert a dict to zlib-compressed JSON bytes for the database."""
+        if value is None:
+            return None
+        json_bytes = json.dumps(value, sort_keys=True).encode("utf-8")
+        return zlib.compress(json_bytes)
+
+    def process_result_value(
+        self,
+        value: bytes | None,
+        dialect: Any,  # noqa: ANN401, ARG002
+    ) -> dict[str, Any] | None:
+        """Convert compressed JSON bytes from the database back to a dict."""
+        if value is None:
+            return None
+        json_bytes = zlib.decompress(value)
+        return json.loads(json_bytes.decode("utf-8"))
 
 
 class Role(StrEnum):

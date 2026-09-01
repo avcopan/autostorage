@@ -30,7 +30,6 @@ with db.session() as session:
 
     # Create scan model (a relaxed scan calculation)
     model = ModelRow(
-        calc_type="scan",
         program="psi4",
         method="b3lyp",
         basis="6-31g*",
@@ -39,7 +38,7 @@ with db.session() as session:
     session.flush()
 
     # Create the scan calculation
-    calc_scan = CalculationRow(model_id=model.id)
+    calc_scan = CalculationRow(model_id=model.id, calc_type="scan")
     session.add(calc_scan)
     session.flush()
 
@@ -112,7 +111,7 @@ with db.session() as session:
         calculation_id=calc_scan.id,
         order=0,
         is_pseudo=True,
-        is_valid=False,
+        is_validated=False,
     )
 
     # End point: longest bonds (2, 2)
@@ -121,7 +120,7 @@ with db.session() as session:
         calculation_id=calc_scan.id,
         order=0,
         is_pseudo=True,
-        is_valid=False,
+        is_validated=False,
     )
 
     # Pseudo TS: center of the scan grid (1, 1)
@@ -131,7 +130,7 @@ with db.session() as session:
         calculation_id=calc_scan.id,
         order=1,
         is_pseudo=True,
-        is_valid=False,
+        is_validated=False,
     )
 
     session.add_all([stat_start, stat_end, stat_ts])
