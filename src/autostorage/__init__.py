@@ -1,6 +1,6 @@
 """Interface for database storage."""
 
-__version__ = "0.0.13"
+__version__ = "0.0.14"
 
 from . import events, types
 from .database import Database
