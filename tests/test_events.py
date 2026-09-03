@@ -1216,6 +1216,43 @@ class TestAddInchiIdentity:
             identity_count = session.query(IdentityRow).count()
             assert identity_count == EXPECTED_IDENTITY_COUNT_TWO
 
+    def test_inchi_identity_added_with_relationship_object(
+        self, database: Database, make_model_opt: Callable[[], ModelRow]
+    ) -> None:
+        """InChI identity is added when StationaryPointRow uses relationship object."""
+        with database.session() as session:
+            model = make_model_opt()
+            session.add(model)
+            session.flush()
+
+            calc = CalculationRow(
+                calc_type="opt",
+                model_id=model.id,
+                input_provenance={},
+                output_provenance={},
+            )
+            geom = GeometryRow(
+                symbols=["C", "O"],
+                coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
+                charge=0,
+                spin=1,
+            )
+
+            # Create StationaryPointRow with relationship objects (no IDs)
+            # This mimics the pattern used in the demo where objects are created
+            # and added together without intermediate flushes
+            stat_point = StationaryPointRow(calculation=calc, geometry=geom, order=0)
+
+            session.add_all([calc, geom, stat_point])
+            session.flush()
+
+            # Identity should be auto-populated despite using relationship objects
+            assert len(stat_point.identities) == 1
+            identity = stat_point.identities[0]
+            assert identity.kind == "stereoisomer"
+            assert identity.algorithm == "rdkit inchi"
+            assert identity.value.startswith("InChI=")
+
 
 class TestAddSmilesExtras:
     """Tests for add_smiles_extras_before_flush event listener."""
