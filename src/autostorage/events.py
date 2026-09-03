@@ -228,11 +228,11 @@ def add_inchi_identities_before_flush(
         if not isinstance(obj, StationaryPointRow):
             continue
 
-        if obj.geometry_id is None or obj.identities:
-            continue
-
-        # Load the geometry
-        geometry_row = session.get(GeometryRow, obj.geometry_id)
+        # Get geometry - try relationship first (for `geometry=geo_row`),
+        # then load via FK (for `geometry_id=id`)
+        geometry_row = obj.geometry
+        if geometry_row is None and obj.geometry_id is not None:
+            geometry_row = session.get(GeometryRow, obj.geometry_id)
         if geometry_row is None:
             continue
 
@@ -298,11 +298,15 @@ def add_smiles_extras_before_flush(
         if not isinstance(obj, StationaryPointRow):
             continue
 
-        if obj.geometry_id is None or not obj.identities:
+        # Skip if no identities attached yet
+        if not obj.identities:
             continue
 
-        # Load the geometry
-        geometry_row = session.get(GeometryRow, obj.geometry_id)
+        # Get geometry - try relationship first (for `geometry=geo_row`),
+        # then load via FK (for `geometry_id=id`)
+        geometry_row = obj.geometry
+        if geometry_row is None and obj.geometry_id is not None:
+            geometry_row = session.get(GeometryRow, obj.geometry_id)
         if geometry_row is None:
             continue
 
@@ -349,11 +353,15 @@ def add_hill_extras_before_flush(
         if not isinstance(obj, StationaryPointRow):
             continue
 
-        if obj.geometry_id is None or not obj.identities:
+        # Skip if no identities attached yet
+        if not obj.identities:
             continue
 
-        # Load the geometry
-        geometry_row = session.get(GeometryRow, obj.geometry_id)
+        # Get geometry - try relationship first (for `geometry=geo_row`),
+        # then load via FK (for `geometry_id=id`)
+        geometry_row = obj.geometry
+        if geometry_row is None and obj.geometry_id is not None:
+            geometry_row = session.get(GeometryRow, obj.geometry_id)
         if geometry_row is None:
             continue
 

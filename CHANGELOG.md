@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Identity auto-population event listeners** (`add_inchi_identities_before_flush`, `add_smiles_extras_before_flush`, `add_hill_extras_before_flush`): Now correctly handle `StationaryPointRow` objects created with relationship objects (`geometry=geo_row`) in addition to foreign key IDs (`geometry_id=geom.id`). Previously, the listeners only checked `geometry_id` and used `session.get()` to load the geometry, which failed when objects were created with relationships and added together without intermediate flushes (as in batch workflow patterns). The fix tries the relationship first, then falls back to FK-based loading, supporting both creation patterns.
+
 ## [0.0.14] - 2026-09-01
 ### Changed
 -- **Bump** `automol` to v0.0.23 to resolve dependency installations
