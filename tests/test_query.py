@@ -21,7 +21,7 @@ WATER_INCHI = "InChI=1S/H2O/h1H2"
 
 
 @pytest.fixture
-def database(tmp_path: Path) -> Generator[Database, None, None]:
+def database(tmp_path: Path) -> Generator[Database]:
     """Database with one regular and one pseudo water stationary point."""
     with Database(tmp_path / "test.db") as db:
         with db.session() as session:

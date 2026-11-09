@@ -40,14 +40,14 @@ from autostorage.types import Role
 
 
 @pytest.fixture
-def db_path() -> Generator[Path, None, None]:
+def db_path() -> Generator[Path]:
     """Create a temporary database path for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir) / "test.db"
 
 
 @pytest.fixture
-def database(db_path: Path) -> Generator[Database, None, None]:
+def database(db_path: Path) -> Generator[Database]:
     """Create a Database instance for testing."""
     db = Database(db_path)
     yield db
@@ -181,7 +181,7 @@ class TestGeometryRow:
             assert relabeled.id != water.id
             assert session.get(GeometryRow, relabeled.id) is not None
             assert relabeled.symbols == ["H", "O", "H"]
-            assert len(session.exec(select(GeometryRow)).all()) == 2  # noqa: PLR2004
+            assert len(session.exec(select(GeometryRow)).all()) == 2
 
     def test_geometry_relationships(
         self, database: Database, hydrogen: GeometryRow
@@ -208,7 +208,7 @@ class TestTrajectoryRow:
             session.commit()
 
             assert traj.id is not None
-            assert traj.ndim == 3  # noqa: PLR2004
+            assert traj.ndim == 3
 
     def test_create_trajectory_without_ndim(self, database: Database) -> None:
         """TrajectoryRow can be created without ndim."""
@@ -295,7 +295,7 @@ class TestTrajectoryRow:
         script = view.startjs + view.endjs
         assert "addModelsAsFrames" in script
         assert '"interval": 100' in script
-        assert script.count("Geometry(q=0, s=0)") == 3  # noqa: PLR2004
+        assert script.count("Geometry(q=0, s=0)") == 3
         assert "1.10000000" in script
         assert "3.10000000" in script
         assert "1.00000000" not in script
@@ -982,7 +982,7 @@ class TestModelIntegration:
             session.add_all([ene, grad, hess])
             session.commit()
 
-            assert len(hydrogen.properties) == 3  # noqa: PLR2004
+            assert len(hydrogen.properties) == 3
 
     def test_calculation_with_multiple_geometries(self, database: Database) -> None:
         """Calculation can be linked to multiple geometries."""
@@ -1009,7 +1009,7 @@ class TestModelIntegration:
             session.add_all([link1, link2])
             session.commit()
 
-            assert len(calc.geometry_links) == 2  # noqa: PLR2004
+            assert len(calc.geometry_links) == 2
 
     def test_stationary_point_with_identity(self, database: Database) -> None:
         """Stationary point can be linked to an identity."""
@@ -1051,7 +1051,7 @@ class TestModelIntegration:
             # Test bidirectional relationship
             # Note: stat_pt will have auto-generated identities from event listener
             # plus the manually linked one
-            assert len(stat_pt.identities) >= 2  # noqa: PLR2004
+            assert len(stat_pt.identities) >= 2
             assert identity.id in [i.id for i in stat_pt.identities]
             assert len(identity.stationary_points) == 1
             assert identity.stationary_points[0].id == stat_pt.id
