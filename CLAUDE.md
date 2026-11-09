@@ -3,6 +3,7 @@
 autostorage is a SQLModel/SQLAlchemy persistence layer for computational chemistry workflow data, built on automol.
 Read `CONTRIBUTING.md` for the workflow, the design rules (the `Row` suffix, conversions and validation from automol, the import layers), and the docstring conventions.
 The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier template.
+`.claude/skills/sqlmodel` and `.agents/skills/sqlmodel` link to the official SQLModel skill inside the installed package, so run `pixi install` first; after a Python upgrade, repair them with `pixi run uvx library-skills --yes --claude`.
 
 ## Commands
 
