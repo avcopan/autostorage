@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Changed
+- automol now comes from the [`avcopan/automech`](https://prefix.dev/channels/avcopan/automech) channel on prefix.dev, and the conda package of autostorage is published there too, instead of the `avcopan` channel on anaconda.org.
+- The automol requirement is relaxed from `==0.0.27` to `>=0.0.31`.
+- **Breaking:** autostorage requires Python 3.13 or later, following [SPEC 0](https://scientific-python.org/specs/spec-0000/).
+- The project now follows the [copier-pixi-python](https://github.com/avcopan/copier-pixi-python) template, and the documentation site is built with Great Docs.
+
+### Removed
+- The unused `matplotlib-base`, `h5py`, `alembic`, and `xyzrender` development dependencies, and the out-of-date schema diagrams.
 
 ## [0.0.19] - 2026-10-09
 
