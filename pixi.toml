@@ -45,16 +45,21 @@ test = { cmd = "pytest", default-environment = "test" }
 [feature.lowest]
 solve-strategy = "lowest"
 
-# Data packages that should always be recent, even when testing lowest versions
-# (other packages depend on them without lower bounds)
+# Floors for packages that other packages depend on without (adequate) lower bounds
 [feature.lowest.constraints]
+# Data packages that should always be recent
 ca-certificates = ">=2026.10.18"
 tzdata = ">=2026c"
-# Older typing-extensions releases break on Python 3.13 (pydantic fails to import)
+# Older typing-extensions releases break on Python 3.13 (e.g. pydantic fails to import)
 typing-extensions = ">=4.12"
-# rdkit's boost (via automol) needs GLIBCXX_3.4.31 (GCC 13); the oldest libstdcxx-ng
-# packages ship an older libstdc++.so.6 that shadows the one from libstdcxx
+# The oldest libstdcxx-ng packages ship a libstdc++.so.6 that shadows the newer one from
+# libstdcxx, so C++ packages fail with "GLIBCXX_3.4.31 not found"
 libstdcxx-ng = ">=13"
+
+# Only use PyPI wheels: unbounded transitive PyPI dependencies would otherwise resolve
+# to ancient source-only releases that fail to build
+[feature.lowest.pypi-options]
+no-build = true
 
 [feature.dev.dependencies]
 # Dependency management
