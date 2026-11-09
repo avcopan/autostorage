@@ -11,7 +11,7 @@ autostorage = { path = "." }
 
 [package]
 name = "autostorage"
-version = "0.0.19"
+version = "0.0.20"
 
 [package.build]
 backend = { name = "pixi-build-python", version = "*" }

@@ -1,6 +1,6 @@
 [project]
 name = "autostorage"
-version = "0.0.19"
+version = "0.0.20"
 readme = "README.md"  # the PyPI page
 license = "MIT"
 license-files = ["LICENSE"]

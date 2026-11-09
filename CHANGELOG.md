@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [0.0.20] - 2026-11-09
 ### Changed
 - **Breaking:** autostorage requires Python 3.13 or later, following [SPEC 0](https://scientific-python.org/specs/spec-0000/).
 - automol is required as `>=0.0.31` (was `==0.0.27`). It brings automol's new geometry functions (e.g. `geom.select_atoms`, `geom.join`, `geom.twist`, multi-frame xyz I/O) and its fix for importing automol in conda environments without xyzrender. See automol's [changelog](https://github.com/avcopan/automol/blob/main/CHANGELOG.md).
