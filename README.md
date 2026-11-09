@@ -4,6 +4,7 @@
 [![Pixi Badge](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/prefix-dev/pixi/main/assets/badge/v0.json)](https://pixi.sh)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Typing: ty](https://img.shields.io/badge/typing-ty-EFC621.svg)](https://github.com/astral-sh/ty)
+[![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/master/img/badge/badge-grayscale-border.json)](https://github.com/copier-org/copier)
 
 A [SQLModel](https://sqlmodel.tiangolo.com/)/SQLAlchemy persistence layer for computational chemistry workflow data, built on top of [`automol`](https://github.com/avcopan/automol). It stores molecular geometries, chemical identities, trajectories, stationary points, calculation results (energies, gradients, Hessians), and the calculations/reaction steps that connect them, as a graph of related rows in a SQLite database.
 
@@ -11,20 +12,19 @@ A [SQLModel](https://sqlmodel.tiangolo.com/)/SQLAlchemy persistence layer for co
 
 ## Installation
 
-Install as a [Pixi](https://pixi.sh) dependency:
-
-```toml
-[dependencies]
-autostorage = ">=0.0.12"
-```
-
-Or with `uv`/`pip` from PyPI:
+autostorage requires Python 3.13 or later.
+With [Pixi](https://pixi.sh), add it from the [`avcopan/automech`](https://prefix.dev/channels/avcopan/automech) channel on prefix.dev, which also has automol:
 
 ```bash
-uv add autostorage
+pixi workspace channel add https://repo.prefix.dev/avcopan/automech
+pixi add autostorage
 ```
 
-Requires Python ≥3.12.
+Or install it from PyPI:
+
+```bash
+pip install autostorage  # or: uv add autostorage
+```
 
 ## Usage
 
@@ -99,14 +99,18 @@ with Database("workflow.db") as db, db.session() as session:
 
 `Database.session()` returns an `AutostorageSession` (a `sqlmodel.Session`, so `session.exec(...)` is available) that supports the context manager protocol. Validation and automatic identities are only applied by these sessions. Sessions don't commit automatically — call `session.commit()` explicitly to persist changes.
 
-For a full worked example covering geometries, trajectories, results, stationary points, stages, and steps, see [`examples/stationary.py`](examples/stationary.py).
+For a full worked example covering geometries, trajectories, results, stationary points, stages, and steps, see [`examples/stationary.py`](https://github.com/avcopan/autostorage/blob/main/examples/stationary.py).
 
-See [CLAUDE.md](.claude/CLAUDE.md) for the full module map and architecture notes, or the [Sphinx docs](docs/source) for a rendered quickstart and API reference.
+See the [documentation](https://avcopan.github.io/autostorage/) for the user guide and API reference.
 
 ## Contributing
 
-Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change. See [Contributing](https://github.com/avcopan/autostorage/blob/main/CONTRIBUTING.md) for the workflow and design rules.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](https://github.com/avcopan/autostorage/blob/main/LICENSE).
+
+## Credits
+
+This package was created with [copier](https://copier.readthedocs.io/) and the [avcopan/copier-pixi-python](https://github.com/avcopan/copier-pixi-python) project template.

@@ -15,7 +15,7 @@ case "$1" in
     echo "Git hooks disabled for this repository."
     ;;
   on)
-    git config --unset core.hooksPath
+    git config --unset core.hooksPath || true
     echo "Git hooks re-enabled for this repository."
     ;;
   *)

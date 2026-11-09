@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Changed
+- **Breaking:** autostorage requires Python 3.13 or later, following [SPEC 0](https://scientific-python.org/specs/spec-0000/).
+- automol is required as `>=0.0.31` (was `==0.0.27`). It brings automol's new geometry functions (e.g. `geom.select_atoms`, `geom.join`, `geom.twist`, multi-frame xyz I/O) and its fix for importing automol in conda environments without xyzrender. See automol's [changelog](https://github.com/avcopan/automol/blob/main/CHANGELOG.md).
+- The conda package is published to the [`avcopan/automech`](https://prefix.dev/channels/avcopan/automech) channel on prefix.dev, which also has automol, instead of the `avcopan` channel on anaconda.org. Install it with `pixi workspace channel add https://repo.prefix.dev/avcopan/automech` and `pixi add autostorage`.
+- The documentation site is built with Great Docs, with a user guide (quickstart, data models, database) whose examples are tested.
+- The project follows the [copier-pixi-python](https://github.com/avcopan/copier-pixi-python) template, which also adds the README, license, and repository and documentation links to the PyPI page.
+
+### Removed
+- The out-of-date schema diagrams (`schema/`).
 
 ## [0.0.19] - 2026-10-09
 

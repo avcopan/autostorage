@@ -1,51 +1,51 @@
 [project]
 name = "autostorage"
 version = "0.0.19"
+readme = "README.md"  # the PyPI page
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     {name = "Andreas V. Copan", email = "avcopan@uga.edu"},
-    {name = "Troy N. Smith", email = "troy.smith@uga.edu"}
+    {name = "Troy N. Smith", email = "troy.smith@uga.edu"},
 ]
-requires-python = ">= 3.12"
 dependencies = [
-    "automol==0.0.27",
+    "automol>=0.0.31",
     "sqlmodel>=0.0.31",
 ]
+requires-python = ">= 3.13"
+
+[project.urls]
+Repository = "https://github.com/avcopan/autostorage"
+Documentation = "https://avcopan.github.io/autostorage/"
 
 [build-system]
 build-backend = "uv_build"
-requires = ["uv_build<0.12"]
-
-# UV build configurations
-[tool.uv.build-backend]
-module-name = "autostorage"
+requires = ["uv_build"]
 
 # Ruff configurations
 [tool.ruff]
-exclude = [
-    "docs",
-    "**/*.ipynb",
-]
+extend-exclude = [".claude"]  # vendored agent skills
 
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
     "COM812",   # missing trailing comma (handled by format)
     "TID252",   # relative import
-    "D203",     # confict: incorrect blank line before class (uses D211 instead)
+    "D203",     # conflict: incorrect blank line before class (uses D211 instead)
     "D213",     # conflict: multi-line summary second line (uses D212 instead)
-    "CPY001",   # missing copyright
+    "CPY001",   # copyright notice
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**.py" = ["S101"]
-"examples/**.py" = ["S101", "T201", "INP001"]
+"tests/**.py" = ["S101", "PLR2004"]  # assert, magic values
+"examples/**.py" = ["S101", "T201", "INP001"]  # assert, print, no __init__.py
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 # Ty configurations
 [tool.ty.environment]
-python = ".pixi/envs/dev/bin/python"
+python = ".pixi/envs/test/bin/python"
 
 [tool.ty.src]
 include = [
@@ -59,7 +59,7 @@ root_package = "autostorage"
 exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
-name = "Autostorage Layering"
+name = "Module Layering"
 type = "layers"
 layers = [
     "autostorage.database",

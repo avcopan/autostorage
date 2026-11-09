@@ -36,14 +36,14 @@ NATOMS_TWO = 2
 
 
 @pytest.fixture
-def db_path() -> Generator[Path, None, None]:
+def db_path() -> Generator[Path]:
     """Create a temporary database path for testing."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir) / "test.db"
 
 
 @pytest.fixture
-def database(db_path: Path) -> Generator[Database, None, None]:
+def database(db_path: Path) -> Generator[Database]:
     """Create a Database instance for testing."""
     db = Database(db_path)
     yield db
@@ -1201,7 +1201,7 @@ class TestVerifyPropertyValues:
             session.refresh(pv)
 
             assert pv.value.dtype == np.float64
-            assert float(pv.value) == -1234.567891234  # noqa: PLR2004
+            assert float(pv.value) == -1234.567891234
             assert float(pv_int.value) == -1.0
 
     def test_gradient_accepts_flat_and_matrix_shapes(self, database: Database) -> None:
