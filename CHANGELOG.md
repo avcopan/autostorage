@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Changed
+- **Breaking:** autostorage depends on [autogeom](https://github.com/avcopan/autogeom) instead of automol. autogeom is automol's `Geometry` code under a new name, which no longer clashes with the `automol` module of the older AutoMech codes. `GeometryRow` extends `autogeom.Geometry`, and its functions are imported from the package root (`autogeom.center_of_mass(geo)` instead of `automol.geom.center_of_mass(geo)`). See autogeom's [changelog](https://github.com/avcopan/autogeom/blob/main/CHANGELOG.md).
+- **Breaking:** the identity framework moves from automol into autostorage (`autostorage.identity`), in a simpler form that matches `PropertyKindRegistry`:
+
+  | before | now |
+  |---|---|
+  | `automol.Algorithm` | `autostorage.IdentityAlgorithm` (frozen) |
+  | `automol.AlgorithmRegistry` | `autostorage.IdentityAlgorithmRegistry` |
+  | `automol.IdentityKind` | `autostorage.IdentityKind` |
+  | `automol.rdkit_inchi`, `rdkit_smiles`, `hill_formula` | `autostorage.rdkit_inchi`, `rdkit_smiles`, `hill_formula` |
+  | `register(..., parent_algorithm=...)`, `algorithm.parent_algorithm` | `register(..., parent=...)`, `algorithm.parent` |
+  | `algorithm.geometry_fn(value)` | removed; use `autogeom.from_smiles(value)` or `autogeom.from_inchi(value)` |
+  | `AlgorithmAlreadyRegisteredError` on a duplicate name | `ValueError` |
+
+  Identity functions keep the signature `(geo, other_geos=None) -> str`, but it is no longer checked at registration.
+  The database schema and the algorithm names are unchanged, so existing databases keep working.
+
+### Added
+- `IdentityAlgorithmRegistry.get(name)`, which returns a registered algorithm by name.
+- A user guide page on identities, including how to register a custom algorithm.
 
 ## [0.0.20] - 2026-11-09
 ### Changed

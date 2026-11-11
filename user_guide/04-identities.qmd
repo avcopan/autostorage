@@ -1,0 +1,98 @@
+---
+title: "Identities"
+guide-section: "User Guide"
+---
+
+# Identities
+
+An identity is a string that says what a stationary point *is*: its formula, its InChI, its SMILES, a conformer label.
+Each identity comes from an **identity algorithm**, and each algorithm partitions the stationary points in a database into groups that share a value.
+Different algorithms partition at different resolutions, so the same stationary points can be grouped by formula, by stereoisomer, or by conformer.
+
+## Built-in algorithms
+
+autostorage registers three algorithms itself:
+
+| algorithm | kind | parent | value |
+|---|---|---|---|
+| `rdkit_inchi` | `stereoisomer` | | Standard InChI, from `autogeom.inchi` |
+| `rdkit_smiles` | `stereoisomer` | `rdkit_inchi` | SMILES, from `autogeom.smiles` |
+| `hill_formula` | `formula` | `rdkit_inchi` | Formula in Hill order, from `autogeom.formula` |
+
+When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry is replaced.
+Stationary points with the same value share one `IdentityRow`.
+If an algorithm fails for a geometry (for example, InChI for a metal complex), an `IdentityGenerationWarning` is issued and that identity is skipped.
+
+Look stationary points up by identity with `query.stationary_point_by_identity`:
+
+```python
+from autostorage import Database, query, rdkit_inchi
+
+with Database(":memory:") as db, db.session() as session:
+    stmt = query.stationary_point_by_identity(rdkit_inchi, "InChI=1S/H2O/h1H2")
+    waters = session.exec(stmt).all()
+```
+
+## Kinds
+
+Every algorithm has an `IdentityKind` that says what sort of identity it produces: `formula`, `isomer`, `stereoisomer`, or `conformer`.
+This lets code select algorithms by kind without naming a specific one.
+
+## Parents and `other_geos`
+
+An identity function has the signature `(geo, other_geos=None) -> str`.
+For an algorithm with a `parent`, `other_geos` holds one geometry per existing identity value among the stationary points that share this geometry's *parent* identity.
+The function can then return one of those existing values instead of making a new one.
+
+`rdkit_smiles` uses this: its parent is `rdkit_inchi`, so if a stationary point with the same InChI already has a SMILES, that SMILES is reused, even if it isn't RDKit's canonical one.
+The same mechanism lets a conformer algorithm compare a new geometry only against the conformers of the same species.
+
+## Registering your own algorithm
+
+Register an algorithm before opening the `Database`, which mirrors the registry into its `identity_algorithm` table:
+
+```python
+import uuid
+from collections.abc import Mapping
+
+import autogeom
+import numpy as np
+from autogeom import Geometry
+
+from autostorage import Database, IdentityAlgorithmRegistry, IdentityKind, rdkit_inchi
+
+
+def rmsd_conformer_identity_fn(
+    geo: Geometry, other_geos: Mapping[str, Geometry] | None = None
+) -> str:
+    """Reuse the label of an existing conformer within 0.1 Å RMSD, or make a new one."""
+    for label, other_geo in (other_geos or {}).items():
+        aligned = autogeom.rotate(
+            autogeom.center(geo), autogeom.alignment_rotation(geo, other_geo)
+        )
+        diff = aligned.coordinates - autogeom.center(other_geo).coordinates
+        if np.sqrt((diff**2).sum(axis=1).mean()) < 0.1:
+            return label
+    return uuid.uuid4().hex
+
+
+rmsd_conformer = IdentityAlgorithmRegistry.register(
+    name="rmsd_conformer",
+    kind=IdentityKind.CONFORMER,
+    identity_fn=rmsd_conformer_identity_fn,
+    parent=rdkit_inchi,  # compare only against geometries with the same InChI
+)
+
+db = Database(":memory:")  # new stationary points now also get an rmsd_conformer identity
+db.close()
+```
+
+Algorithm names must be unique: registering a name twice raises a `ValueError`.
+`IdentityAlgorithmRegistry.get(name)` returns a registered algorithm, and `IdentityAlgorithmRegistry.algorithms` lists them all.
+
+An identity function should raise `ValueError`, `NotImplementedError`, or `autogeom.GeometryConversionError` for a geometry it cannot handle; these are reported as an `IdentityGenerationWarning`.
+
+## Next steps
+
+- [Data models](../user-guide/models.qmd): the `IdentityAlgorithmRow` and `IdentityRow` tables that store identities.
+- [Database](../user-guide/database.qmd): opening a `Database`, which mirrors the registry into it.

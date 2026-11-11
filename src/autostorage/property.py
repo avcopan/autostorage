@@ -92,6 +92,7 @@ def energy_validation_fn(value: npt.NDArray, geo_row: GeometryRow) -> bool:  # n
 energy_property_kind = PropertyKindRegistry.register(
     name="energy", validation_fn=energy_validation_fn
 )
+"""Energy: a scalar, stored as float64."""
 
 
 def gradient_validation_fn(value: npt.NDArray, geo_row: GeometryRow) -> bool:
@@ -103,6 +104,7 @@ def gradient_validation_fn(value: npt.NDArray, geo_row: GeometryRow) -> bool:
 gradient_property_kind = PropertyKindRegistry.register(
     name="gradient", validation_fn=gradient_validation_fn
 )
+"""Gradient: shape ``(3N,)`` or ``(N, 3)``, stored as float64."""
 
 
 def hessian_validation_fn(value: npt.NDArray, geo_row: GeometryRow) -> bool:
@@ -114,3 +116,4 @@ def hessian_validation_fn(value: npt.NDArray, geo_row: GeometryRow) -> bool:
 hessian_property_kind = PropertyKindRegistry.register(
     name="hessian", validation_fn=hessian_validation_fn, dtype=np.float32
 )
+"""Hessian: shape ``(3N, 3N)``, stored as float32."""

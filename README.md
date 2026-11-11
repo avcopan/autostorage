@@ -6,14 +6,14 @@
 [![Typing: ty](https://img.shields.io/badge/typing-ty-EFC621.svg)](https://github.com/astral-sh/ty)
 [![Copier](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/copier-org/copier/master/img/badge/badge-grayscale-border.json)](https://github.com/copier-org/copier)
 
-A [SQLModel](https://sqlmodel.tiangolo.com/)/SQLAlchemy persistence layer for computational chemistry workflow data, built on top of [`automol`](https://github.com/avcopan/automol). It stores molecular geometries, chemical identities, trajectories, stationary points, calculation results (energies, gradients, Hessians), and the calculations/reaction steps that connect them, as a graph of related rows in a SQLite database.
+A [SQLModel](https://sqlmodel.tiangolo.com/)/SQLAlchemy persistence layer for computational chemistry workflow data, built on top of [`autogeom`](https://github.com/avcopan/autogeom). It stores molecular geometries, chemical identities, trajectories, stationary points, calculation results (energies, gradients, Hessians), and the calculations/reaction steps that connect them, as a graph of related rows in a SQLite database.
 
-`GeometryRow` extends `automol.Geometry` directly rather than wrapping it, so geometries already expressed in `automol` types can be persisted with no conversion step (and are validated by automol). Chemical identities (InChI, SMILES, Hill formula) are generated automatically for stationary points using the algorithms in `automol.AlgorithmRegistry`.
+`GeometryRow` extends `autogeom.Geometry` directly rather than wrapping it, so a `Geometry` can be persisted with no conversion step, and autogeom's functions accept the rows directly. Chemical identities (InChI, SMILES, Hill formula) are generated automatically for stationary points by the algorithms in `IdentityAlgorithmRegistry`, to which you can add your own.
 
 ## Installation
 
 autostorage requires Python 3.13 or later.
-With [Pixi](https://pixi.sh), add it from the [`avcopan/automech`](https://prefix.dev/channels/avcopan/automech) channel on prefix.dev, which also has automol:
+With [Pixi](https://pixi.sh), add it from the [`avcopan/automech`](https://prefix.dev/channels/avcopan/automech) channel on prefix.dev, which also has autogeom:
 
 ```bash
 pixi workspace channel add https://repo.prefix.dev/avcopan/automech
@@ -29,7 +29,6 @@ pip install autostorage  # or: uv add autostorage
 ## Usage
 
 ```python
-import automol
 import numpy as np
 from sqlmodel import select
 
@@ -44,6 +43,7 @@ from autostorage import (
     StationaryPointRow,
     energy_property_kind,
     query,
+    rdkit_inchi,
 )
 
 # Open (or create) a SQLite database; ":memory:" also works for scratch use.
@@ -54,7 +54,7 @@ with Database("workflow.db") as db, db.session() as session:
     # Create a calculation using this model.
     calc = CalculationRow(model=model, calc_type="energy")
 
-    # Create a geometry (validated by automol: known elements, consistent spin).
+    # Create a geometry (validated by autogeom: known elements, consistent spin).
     geo = GeometryRow(
         symbols=["H", "O", "H"],
         coordinates=np.array([[0, 0, 0.96], [0, 0, 0], [0.93, 0, -0.24]]),
@@ -93,11 +93,11 @@ with Database("workflow.db") as db, db.session() as session:
     # Hill formula), which can be used to look them up.
     session.add(StationaryPointRow(geometry=geo, calculation=calc))
     session.commit()
-    stmt = query.stationary_point_by_identity(automol.rdkit_inchi, "InChI=1S/H2O/h1H2")
+    stmt = query.stationary_point_by_identity(rdkit_inchi, "InChI=1S/H2O/h1H2")
     print(session.exec(stmt).all())
 ```
 
-`Database.session()` returns an `AutostorageSession` (a `sqlmodel.Session`, so `session.exec(...)` is available) that supports the context manager protocol. Validation and automatic identities are only applied by these sessions. Sessions don't commit automatically — call `session.commit()` explicitly to persist changes.
+`Database.session()` returns an `AutostorageSession` (a `sqlmodel.Session`, so `session.exec(...)` is available) that supports the context manager protocol. Validation and automatic identities are only applied by these sessions. Sessions don't commit automatically: call `session.commit()` explicitly to persist changes.
 
 For a full worked example covering geometries, trajectories, results, stationary points, stages, and steps, see [`examples/stationary.py`](https://github.com/avcopan/autostorage/blob/main/examples/stationary.py).
 
