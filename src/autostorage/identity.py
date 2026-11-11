@@ -3,10 +3,9 @@
 from collections.abc import Mapping
 from typing import ClassVar, Protocol, runtime_checkable
 
-from automol import Geometry, geom, rd
-from automol import hill_formula as _hill_formula
+import autogeom
+from autogeom import Geometry
 from pydantic import BaseModel, ConfigDict
-from rdkit import Chem
 
 from .types import IdentityKind
 
@@ -110,7 +109,7 @@ def rdkit_inchi_identity_fn(
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate a standard InChI string with RDKit."""
-    return rd.mol.inchi(geom.rdkit_mol(geo))
+    return autogeom.inchi(geo)
 
 
 rdkit_inchi = IdentityAlgorithmRegistry.register(
@@ -118,6 +117,7 @@ rdkit_inchi = IdentityAlgorithmRegistry.register(
     kind=IdentityKind.STEREOISOMER,
     identity_fn=rdkit_inchi_identity_fn,
 )
+"""Standard InChI from RDKit (kind: stereoisomer)."""
 
 
 def rdkit_smiles_identity_fn(geo: Geometry, other_geos: OtherGeometries = None) -> str:
@@ -128,11 +128,11 @@ def rdkit_smiles_identity_fn(geo: Geometry, other_geos: OtherGeometries = None) 
     Otherwise, RDKit's canonical SMILES is returned.
     """
     if other_geos:
-        inchi = rdkit_inchi_identity_fn(geo)
+        inchi = autogeom.inchi(geo)
         for smiles, other_geo in other_geos.items():
-            if rdkit_inchi_identity_fn(other_geo) == inchi:
+            if autogeom.inchi(other_geo) == inchi:
                 return smiles
-    return Chem.MolToSmiles(Chem.RemoveAllHs(geom.rdkit_mol(geo)))
+    return autogeom.smiles(geo)
 
 
 rdkit_smiles = IdentityAlgorithmRegistry.register(
@@ -141,6 +141,10 @@ rdkit_smiles = IdentityAlgorithmRegistry.register(
     identity_fn=rdkit_smiles_identity_fn,
     parent=rdkit_inchi,
 )
+"""SMILES from RDKit (kind: stereoisomer; parent: `rdkit_inchi`).
+
+The SMILES of an existing stationary point with the same InChI is reused.
+"""
 
 
 def hill_formula_identity_fn(
@@ -148,7 +152,7 @@ def hill_formula_identity_fn(
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate the molecular formula in Hill order."""
-    return _hill_formula.identity_fn(geo)
+    return autogeom.formula(geo)
 
 
 hill_formula = IdentityAlgorithmRegistry.register(
@@ -157,3 +161,4 @@ hill_formula = IdentityAlgorithmRegistry.register(
     identity_fn=hill_formula_identity_fn,
     parent=rdkit_inchi,
 )
+"""Molecular formula in Hill order (kind: formula; parent: `rdkit_inchi`)."""

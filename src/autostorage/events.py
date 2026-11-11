@@ -10,7 +10,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
-from automol.utils.exc import GeometryConversionError
+from autogeom import GeometryConversionError
 from sqlalchemy import event, inspect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper, UOWTransaction, aliased

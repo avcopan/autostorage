@@ -7,7 +7,7 @@ requires-pixi = ">=0.82"
 [dependencies]
 autostorage = { path = "." }
 # Toggle with `pixi run local start|stop` (see scripts/local.sh)
-# automol = { path = "../automol" }  # local:true
+# autogeom = { path = "../autogeom" }  # local:true
 
 [package]
 name = "autostorage"
@@ -22,7 +22,7 @@ ignore-pypi-mapping = false
 
 [package.build.config.pypi-conda-map]
 # Add name mappings for packages not on conda-forge
-automol = "automol"  # from the avcopan/automech channel
+autogeom = "autogeom"  # from the avcopan/automech channel
 
 [package.host-dependencies]
 # Python and UV are automatically included

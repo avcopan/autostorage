@@ -140,7 +140,7 @@ class TestGeometryRow:
             assert geo.spin == 1
 
     def test_geometry_symbols_canonicalized(self) -> None:
-        """Atomic symbols are validated and canonicalized by automol."""
+        """Atomic symbols are validated and canonicalized by autogeom."""
         geo = GeometryRow(
             symbols=["o", "h", "h"],
             coordinates=[[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],

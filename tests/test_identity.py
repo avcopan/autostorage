@@ -4,7 +4,7 @@ from collections.abc import Mapping
 
 import numpy as np
 import pytest
-from automol import Geometry
+from autogeom import Geometry
 from pydantic import ValidationError
 
 from autostorage import GeometryRow

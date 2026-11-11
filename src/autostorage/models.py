@@ -5,8 +5,8 @@ from collections.abc import Sequence
 from typing import Any, Self
 
 import py3Dmol
-from automol import Geometry
-from automol.utils.types import CoordinatesField
+from autogeom import Geometry
+from autogeom.types import CoordinatesField
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import (
     JSON,
@@ -213,7 +213,7 @@ class GeometryRow(SQLModel, Geometry, table=True):
     def relabel_atoms(self, indices: Sequence[int]) -> Self:
         """Return a reordered copy of this geometry as a new, unsaved row.
 
-        Unlike `automol.Geometry.relabel_atoms`, the copy gets a fresh `id` and
+        Unlike `autogeom.Geometry.relabel_atoms`, the copy gets a fresh `id` and
         no relationships, so that it can be added to a session as a new row.
         """
         relabeled = super().relabel_atoms(indices)
