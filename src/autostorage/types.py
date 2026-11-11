@@ -9,7 +9,7 @@ import numpy as np
 from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 
-__all__ = ["CompressedArrayTypeDecorator", "Role"]
+__all__ = ["CompressedArrayTypeDecorator", "IdentityKind", "Role"]
 
 MAX_DECOMPRESSED_BYTES = 1 << 30
 """Upper bound on the decompressed size of a stored blob (guards against zip bombs)."""
@@ -81,3 +81,12 @@ class Role(StrEnum):
 
     INPUT = "input"
     OUTPUT = "output"
+
+
+class IdentityKind(StrEnum):
+    """Category of molecular identity, from coarsest to finest."""
+
+    FORMULA = "formula"
+    ISOMER = "isomer"
+    STEREOISOMER = "stereoisomer"
+    CONFORMER = "conformer"

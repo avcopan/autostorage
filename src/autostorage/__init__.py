@@ -2,9 +2,17 @@
 
 __version__ = "0.0.20"
 
-from . import events, query, types
+from . import events, identity, query, types
 from .database import Database
 from .events import AutostorageSession, IdentityGenerationWarning
+from .identity import (
+    IdentityAlgorithm,
+    IdentityAlgorithmRegistry,
+    IdentityProtocol,
+    hill_formula,
+    rdkit_inchi,
+    rdkit_smiles,
+)
 from .models import (
     CalculationGeometryLink,
     CalculationRow,
@@ -33,7 +41,7 @@ from .property import (
     gradient_property_kind,
     hessian_property_kind,
 )
-from .types import Role
+from .types import IdentityKind, Role
 
 __all__ = [
     "AutostorageSession",
@@ -43,8 +51,12 @@ __all__ = [
     "Database",
     "GeometryRow",
     "GeometryTrajectoryLink",
+    "IdentityAlgorithm",
+    "IdentityAlgorithmRegistry",
     "IdentityAlgorithmRow",
     "IdentityGenerationWarning",
+    "IdentityKind",
+    "IdentityProtocol",
     "IdentityRow",
     "IdentityStationaryLink",
     "ModelRow",
@@ -65,6 +77,10 @@ __all__ = [
     "events",
     "gradient_property_kind",
     "hessian_property_kind",
+    "hill_formula",
+    "identity",
     "query",
+    "rdkit_inchi",
+    "rdkit_smiles",
     "types",
 ]

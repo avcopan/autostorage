@@ -64,7 +64,8 @@ type = "layers"
 layers = [
     "autostorage.database",
     "autostorage.events",
-    "autostorage.query | autostorage.property",
+    "autostorage.query",
+    "autostorage.property | autostorage.identity",
     "autostorage.models",
     "autostorage.types",
 ]

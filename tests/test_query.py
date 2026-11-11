@@ -3,7 +3,6 @@
 from collections.abc import Generator
 from pathlib import Path
 
-import automol
 import pytest
 from sqlmodel import col, select
 
@@ -11,10 +10,13 @@ from autostorage import (
     CalculationRow,
     Database,
     GeometryRow,
+    IdentityAlgorithm,
     IdentityAlgorithmRow,
     ModelRow,
     StationaryPointRow,
+    hill_formula,
     query,
+    rdkit_inchi,
 )
 
 WATER_INCHI = "InChI=1S/H2O/h1H2"
@@ -46,9 +48,9 @@ def database(tmp_path: Path) -> Generator[Database]:
         yield db
 
 
-@pytest.mark.parametrize("algorithm", [automol.rdkit_inchi, "rdkit_inchi"])
+@pytest.mark.parametrize("algorithm", [rdkit_inchi, "rdkit_inchi"])
 def test_stationary_point_by_identity(
-    database: Database, algorithm: automol.Algorithm | str
+    database: Database, algorithm: IdentityAlgorithm | str
 ) -> None:
     """Stationary points can be selected by algorithm (or name) and value."""
     with database.session() as session:
@@ -76,7 +78,7 @@ def test_include_pseudo(database: Database) -> None:
     """`include_pseudo=True` selects both regular and pseudo stationary points."""
     with database.session() as session:
         stmt = query.stationary_point_by_identity(
-            automol.hill_formula, "H2O", include_pseudo=True
+            hill_formula, "H2O", include_pseudo=True
         )
 
         assert sorted(s.is_pseudo for s in session.exec(stmt).all()) == [False, True]
@@ -85,6 +87,6 @@ def test_include_pseudo(database: Database) -> None:
 def test_no_match(database: Database) -> None:
     """Unknown identity values select nothing."""
     with database.session() as session:
-        stmt = query.stationary_point_by_identity(automol.rdkit_inchi, "InChI=1S/X")
+        stmt = query.stationary_point_by_identity(rdkit_inchi, "InChI=1S/X")
 
         assert session.exec(stmt).all() == []

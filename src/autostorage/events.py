@@ -10,13 +10,13 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
-from automol import Algorithm, AlgorithmRegistry
 from automol.utils.exc import GeometryConversionError
 from sqlalchemy import event, inspect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper, UOWTransaction, aliased
 from sqlmodel import Session, col, select
 
+from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry
 from .models import (
     GeometryRow,
     GeometryTrajectoryLink,
@@ -40,24 +40,24 @@ class IdentityGenerationWarning(UserWarning):
     """An identity algorithm could not generate an identity for a geometry."""
 
 
-# Errors that automol identity functions raise for unsupported or unperceivable
+# Errors that the built-in identity functions raise for unsupported or unperceivable
 # geometries (e.g. metals, no valid Lewis structure, failed InChI generation).
 _IDENTITY_ERRORS = (GeometryConversionError, NotImplementedError, ValueError)
 
 
-def _ordered_algorithms() -> Iterator[Algorithm]:
+def _ordered_algorithms() -> Iterator[IdentityAlgorithm]:
     """Yield registered algorithms (and their parents) with parents first."""
     seen: set[str] = set()
 
-    def _visit(alg: Algorithm) -> Iterator[Algorithm]:
+    def _visit(alg: IdentityAlgorithm) -> Iterator[IdentityAlgorithm]:
         if alg.name in seen:
             return
-        if alg.parent_algorithm is not None:
-            yield from _visit(alg.parent_algorithm)
+        if alg.parent is not None:
+            yield from _visit(alg.parent)
         seen.add(alg.name)
         yield alg
 
-    for alg in AlgorithmRegistry.algorithms:
+    for alg in IdentityAlgorithmRegistry.algorithms:
         yield from _visit(alg)
 
 
@@ -66,8 +66,8 @@ def create_identity_algorithms(session: Session) -> None:
     rows = {row.name: row for row in session.exec(select(IdentityAlgorithmRow))}
     for alg in _ordered_algorithms():
         parent_id = None
-        if alg.parent_algorithm is not None:
-            parent_id = rows[alg.parent_algorithm.name].id
+        if alg.parent is not None:
+            parent_id = rows[alg.parent.name].id
 
         row = rows.get(alg.name)
         if row is None:
@@ -281,7 +281,7 @@ class _IdentityFlushContext:
 
     session: Session
     algorithm_ids: dict[str, int]
-    algorithms: list[Algorithm] = field(
+    algorithms: list[IdentityAlgorithm] = field(
         default_factory=lambda: list(_ordered_algorithms())
     )
     cache: dict[_IdentityKey, IdentityRow] = field(default_factory=dict)
@@ -353,7 +353,7 @@ def _sibling_geometries(
 
 
 def _generate_identity(
-    algorithm: Algorithm,
+    algorithm: IdentityAlgorithm,
     geo_row: GeometryRow,
     other_geos: dict[str, GeometryRow] | None,
 ) -> str | None:
@@ -387,7 +387,7 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
     keys: dict[str, _IdentityKey] = {}
     for algorithm in ctx.algorithms:
         alg_id = ctx.algorithm_ids[algorithm.name]
-        parent = algorithm.parent_algorithm
+        parent = algorithm.parent
         parent_key = keys.get(parent.name) if parent is not None else None
 
         other_geos = None

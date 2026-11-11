@@ -6,12 +6,16 @@ from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-from automol import AlgorithmRegistry
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlmodel import col, select
 
-from autostorage import AutostorageSession, PropertyKindRegistry, events
+from autostorage import (
+    AutostorageSession,
+    IdentityAlgorithmRegistry,
+    PropertyKindRegistry,
+    events,
+)
 from autostorage.database import Database
 from autostorage.models import (
     CalculationGeometryLink,
@@ -176,7 +180,7 @@ class TestDatabaseIntegration:
     def test_insert_and_query_row(self, database: Database) -> None:
         """Can insert and query a row from the database."""
         with database.session() as session:
-            # Algorithms are seeded on Database init from the automol registry
+            # Algorithms are seeded on Database init from the registry
             algorithm = session.exec(
                 select(IdentityAlgorithmRow).where(
                     col(IdentityAlgorithmRow.name) == "rdkit_inchi"
@@ -255,17 +259,17 @@ class TestRegistryTablesPrePopulated:
     def test_identity_algorithms_populated(self, database: Database) -> None:
         """`identity_algorithm` table populated from registry at initialization."""
         with database.session() as sess:
-            for alg in AlgorithmRegistry.algorithms:
+            for alg in IdentityAlgorithmRegistry.algorithms:
                 alg_row = sess.exec(
                     select(IdentityAlgorithmRow).where(
                         col(IdentityAlgorithmRow.name) == alg.name
                     )
                 ).one()
                 assert alg_row.id
-                if alg.parent_algorithm is not None:
+                if alg.parent is not None:
                     parent = sess.get(IdentityAlgorithmRow, alg_row.parent_algorithm_id)
                     assert parent is not None
-                    assert parent.name == alg.parent_algorithm.name
+                    assert parent.name == alg.parent.name
                     assert parent.id
 
     def test_property_kinds_populated(self, database: Database) -> None:
@@ -285,7 +289,7 @@ class TestDatabaseReopen:
                 kinds = sess.exec(select(PropertyKindRow)).all()
                 algs = sess.exec(select(IdentityAlgorithmRow)).all()
                 assert len(kinds) == len(PropertyKindRegistry.property_kinds)
-                assert len(algs) == len(AlgorithmRegistry.algorithms)
+                assert len(algs) == len(IdentityAlgorithmRegistry.algorithms)
 
     def test_context_manager(self, db_path: Path) -> None:
         """`Database` can be used as a context manager."""

@@ -1,9 +1,9 @@
 """Query statement factories for the AutoStorage schema."""
 
-from automol import Algorithm
 from sqlmodel import col, select
 from sqlmodel.sql.expression import SelectOfScalar
 
+from .identity import IdentityAlgorithm
 from .models import (
     IdentityAlgorithmRow,
     IdentityRow,
@@ -15,7 +15,7 @@ __all__ = ["stationary_point_by_identity"]
 
 
 def stationary_point_by_identity(
-    algorithm: Algorithm | IdentityAlgorithmRow | str,
+    algorithm: IdentityAlgorithm | IdentityAlgorithmRow | str,
     value: str,
     *,
     include_pseudo: bool = False,
@@ -23,7 +23,7 @@ def stationary_point_by_identity(
     """Select stationary points with a given identity.
 
     Args:
-        algorithm: Identity algorithm, e.g. `automol.rdkit_inchi`, an
+        algorithm: Identity algorithm, e.g. `autostorage.rdkit_inchi`, an
             `IdentityAlgorithmRow`, or an algorithm name.
         value: Identity value, e.g. an InChI string.
         include_pseudo: Whether to also select pseudo stationary points.

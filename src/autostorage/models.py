@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from typing import Any, Self
 
 import py3Dmol
-from automol import Geometry, IdentityKind
+from automol import Geometry
 from automol.utils.types import CoordinatesField
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import (
@@ -22,7 +22,7 @@ from sqlmodel import (
 )
 from sqlmodel.main import SQLModelConfig
 
-from .types import CompressedArrayTypeDecorator, Role
+from .types import CompressedArrayTypeDecorator, IdentityKind, Role
 
 
 def _fk_field(
@@ -592,7 +592,7 @@ class StepRow(SQLModel, table=True):
 
 # 4. Identity rows
 class IdentityAlgorithmRow(SQLModel, table=True):
-    """A chemical identifier algorithm, mirroring an `automol.Algorithm`.
+    """A chemical identifier algorithm, mirroring an `IdentityAlgorithm`.
 
     Attributes:
         id: Primary key.
