@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [0.0.21] - 2026-11-10
 ### Changed
 - **Breaking:** autostorage depends on [autogeom](https://github.com/avcopan/autogeom) instead of automol. autogeom is automol's `Geometry` code under a new name, which no longer clashes with the `automol` module of the older AutoMech codes. `GeometryRow` extends `autogeom.Geometry`, and its functions are imported from the package root (`autogeom.center_of_mass(geo)` instead of `automol.geom.center_of_mass(geo)`). See autogeom's [changelog](https://github.com/avcopan/autogeom/blob/main/CHANGELOG.md).
 - **Breaking:** the identity framework moves from automol into autostorage (`autostorage.identity`), in a simpler form that matches `PropertyKindRegistry`:
