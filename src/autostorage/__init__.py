@@ -11,6 +11,7 @@ from .identity import (
     IdentityProtocol,
     hill_formula,
     rdkit_inchi,
+    rdkit_inchi_conn,
     rdkit_smiles,
 )
 from .models import (
@@ -81,6 +82,7 @@ __all__ = [
     "identity",
     "query",
     "rdkit_inchi",
+    "rdkit_inchi_conn",
     "rdkit_smiles",
     "types",
 ]

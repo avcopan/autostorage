@@ -9,7 +9,7 @@ authors = [
     {name = "Troy N. Smith", email = "troy.smith@uga.edu"},
 ]
 dependencies = [
-    "autogeom>=0.0.1",
+    "autogeom>=0.0.2",
     "sqlmodel>=0.0.31",
 ]
 requires-python = ">= 3.13"
