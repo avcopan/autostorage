@@ -51,53 +51,20 @@ def database(db_path: Path) -> Generator[Database]:
 
 
 @pytest.fixture
-def make_model_gradient() -> Callable[[], ModelRow]:
-    """Create factory for gradient calculation ModelRow."""
+def make_calculation() -> Callable[[], CalculationRow]:
+    """Create factory for an optimization CalculationRow with its own ModelRow."""
 
-    def _make() -> ModelRow:
-        return ModelRow(program="psi4", method="B3LYP")
-
-    return _make
-
-
-@pytest.fixture
-def make_model_frequency() -> Callable[[], ModelRow]:
-    """Create factory for frequency calculation ModelRow."""
-
-    def _make() -> ModelRow:
-        return ModelRow(program="psi4", method="B3LYP")
-
-    return _make
-
-
-@pytest.fixture
-def make_model_opt() -> Callable[[], ModelRow]:
-    """Create factory for optimization calculation ModelRow."""
-
-    def _make() -> ModelRow:
-        return ModelRow(program="psi4", method="B3LYP")
-
-    return _make
-
-
-@pytest.fixture
-def make_calculation() -> Callable[[int], CalculationRow]:
-    """Create factory for CalculationRow with empty provenance."""
-
-    def _make(model_id: int) -> CalculationRow:
+    def _make() -> CalculationRow:
         return CalculationRow(
-            calc_type="opt",
-            model_id=model_id,
-            input_provenance={},
-            output_provenance={},
+            model=ModelRow(program="psi4", method="B3LYP"), calc_type="opt"
         )
 
     return _make
 
 
 @pytest.fixture
-def make_geometry_5atom() -> Callable[[], GeometryRow]:
-    """Create factory for 5-atom geometry (C, H, H, H, H)."""
+def make_geometry_methane() -> Callable[[], GeometryRow]:
+    """Create factory for a methane geometry (C, H, H, H, H)."""
 
     def _make() -> GeometryRow:
         return GeometryRow(
@@ -111,6 +78,19 @@ def make_geometry_5atom() -> Callable[[], GeometryRow]:
             ],
             charge=0,
             spin=0,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_geometry_water() -> Callable[[], GeometryRow]:
+    """Create factory for a water geometry (O, H, H)."""
+
+    def _make() -> GeometryRow:
+        return GeometryRow(
+            symbols=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],
         )
 
     return _make
@@ -378,11 +358,11 @@ class TestVerifyTrajectoryGeometryNdim:
     """Tests for verify_trajectory_geometry_ndim event listener."""
 
     def test_matching_index_and_ndim(
-        self, database: Database, make_geometry_5atom: Callable[[], GeometryRow]
+        self, database: Database, make_geometry_methane: Callable[[], GeometryRow]
     ) -> None:
         """Index length matching ndim is accepted."""
         with database.session() as session:
-            geom = make_geometry_5atom()
+            geom = make_geometry_methane()
             traj = TrajectoryRow(ndim=NDIM_2)
             session.add_all([geom, traj])
             session.flush()
@@ -400,11 +380,11 @@ class TestVerifyTrajectoryGeometryNdim:
             assert link.trajectory.ndim == NDIM_2
 
     def test_mismatched_index_and_ndim_raises(
-        self, database: Database, make_geometry_5atom: Callable[[], GeometryRow]
+        self, database: Database, make_geometry_methane: Callable[[], GeometryRow]
     ) -> None:
         """Index length not matching ndim raises ValueError."""
         with database.session() as session:
-            geom = make_geometry_5atom()
+            geom = make_geometry_methane()
             traj = TrajectoryRow(ndim=NDIM_3)
             session.add_all([geom, traj])
             session.flush()
@@ -421,11 +401,11 @@ class TestVerifyTrajectoryGeometryNdim:
                 session.flush()
 
     def test_index_infers_ndim(
-        self, database: Database, make_geometry_5atom: Callable[[], GeometryRow]
+        self, database: Database, make_geometry_methane: Callable[[], GeometryRow]
     ) -> None:
         """Index length infers trajectory ndim if ndim is None."""
         with database.session() as session:
-            geom = make_geometry_5atom()
+            geom = make_geometry_methane()
             traj = TrajectoryRow(ndim=None)
             session.add_all([geom, traj])
             session.flush()
@@ -442,11 +422,11 @@ class TestVerifyTrajectoryGeometryNdim:
             assert link.trajectory.ndim == NDIM_3
 
     def test_missing_index_with_set_ndim_raises(
-        self, database: Database, make_geometry_5atom: Callable[[], GeometryRow]
+        self, database: Database, make_geometry_methane: Callable[[], GeometryRow]
     ) -> None:
         """Missing index when ndim is set raises ValueError."""
         with database.session() as session:
-            geom = make_geometry_5atom()
+            geom = make_geometry_methane()
             traj = TrajectoryRow(ndim=NDIM_2)
             session.add_all([geom, traj])
             session.flush()
@@ -476,11 +456,11 @@ class TestVerifyTrajectoryGeometryNdim:
             # (the insert will fail on FK constraint, but event shouldn't crash)
 
     def test_index_none_and_ndim_none(
-        self, database: Database, make_geometry_5atom: Callable[[], GeometryRow]
+        self, database: Database, make_geometry_methane: Callable[[], GeometryRow]
     ) -> None:
         """Both index and ndim None is allowed."""
         with database.session() as session:
-            geom = make_geometry_5atom()
+            geom = make_geometry_methane()
             traj = TrajectoryRow(ndim=None)
             session.add_all([geom, traj])
             session.flush()
@@ -561,35 +541,18 @@ class TestAddInchiIdentity:
     """Tests for add_inchi_identity event listener."""
 
     def test_inchi_identity_added_on_insert(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """InChI identity is automatically attached to a new stationary point."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc = make_calculation()
             session.add(calc)
             session.flush()
 
-            geom = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom = make_geometry_methane()
             session.add(geom)
             session.flush()
 
@@ -606,54 +569,20 @@ class TestAddInchiIdentity:
             assert identity.value.startswith("InChI=")
 
     def test_existing_inchi_identity_reused(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Existing InChI identity is reused for duplicate geometries."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
             # Create two identical geometries
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
-            geom2 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom1 = make_geometry_methane()
+            geom2 = make_geometry_methane()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -673,47 +602,24 @@ class TestAddInchiIdentity:
             assert inchi1.id == inchi2.id
             assert inchi1.value == inchi2.value
 
-            # Both stationary points share the same 3 identities (InChI, SMILES,
-            # and hill_formula), so only 3 IdentityRows should exist in total.
+            # Both stationary points share one identity per registered algorithm,
+            # so there is only one IdentityRow per algorithm in total.
             identity_count = len(session.exec(select(IdentityRow)).all())
             assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
 
     def test_different_geometries_create_different_identities(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different InChI identities."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom1 = make_geometry_methane()
             geom2 = GeometryRow(
                 symbols=["C", "C"],
                 coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
@@ -739,38 +645,21 @@ class TestAddInchiIdentity:
             assert inchi1.id != inchi2.id
             assert inchi1.value != inchi2.value
 
-            # Each stationary point has its own set of 3 identities (InChI,
-            # SMILES, and hill_formula), none of which are shared.
+            # Each stationary point has its own identity per registered
+            # algorithm, none of which are shared.
             identity_count = len(session.exec(select(IdentityRow)).all())
             assert identity_count == EXPECTED_IDENTITY_COUNT_SIX
 
     def test_inchi_identity_added_with_relationship_object(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """InChI identity is added when StationaryPointRow uses relationship object."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            geom = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            calc = make_calculation()
+            geom = make_geometry_methane()
 
             # Create StationaryPointRow with relationship objects (no IDs)
             # This mimics the pattern used in the demo where objects are created
@@ -792,35 +681,18 @@ class TestAddSmilesIdentity:
     """Tests for the SMILES identity attached by the registry identity listener."""
 
     def test_smiles_identity_added_on_insert(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """SMILES is automatically attached as an IdentityRow to stationary point."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc = make_calculation()
             session.add(calc)
             session.flush()
 
-            geom = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom = make_geometry_methane()
             session.add(geom)
             session.flush()
 
@@ -830,60 +702,26 @@ class TestAddSmilesIdentity:
             session.add(stat_point)
             session.flush()
 
-            # Should have identities for InChI, SMILES, and hill_formula.
+            # Should have one identity per registered algorithm.
             assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
             smiles_identity = _identity_for_algorithm(stat_point, "rdkit_smiles")
             assert smiles_identity.value == "C"  # Methane SMILES
 
     def test_duplicate_smiles_not_created(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Duplicate SMILES are not created for the same geometry."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
             # Create two identical geometries
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
-            geom2 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom1 = make_geometry_methane()
+            geom2 = make_geometry_methane()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -902,49 +740,26 @@ class TestAddSmilesIdentity:
             assert smiles1.id == smiles2.id
             assert smiles1.value == "C"
 
-            # Only 3 IdentityRows total (InChI, SMILES, hill_formula), shared
-            # between both stationary points.
+            # Only one IdentityRow per registered algorithm, shared between both
+            # stationary points.
             identity_count = len(session.exec(select(IdentityRow)).all())
             assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
 
     def test_different_smiles_for_different_geometries(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different SMILES identities."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
             # Methane
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
-            # Ethane
+            geom1 = make_geometry_methane()
+            # Two carbons, no hydrogens
             geom2 = GeometryRow(
                 symbols=["C", "C"],
                 coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
@@ -967,7 +782,7 @@ class TestAddSmilesIdentity:
             smiles2 = _identity_for_algorithm(stat2, "rdkit_smiles")
             assert smiles1.id != smiles2.id
             assert smiles1.value == "C"
-            # Ethane SMILES should be different from methane
+            # C2 SMILES should be different from methane
             assert smiles2.value != "C"
 
 
@@ -975,35 +790,18 @@ class TestAddHillIdentity:
     """Tests for the hill_formula identity attached by the identity listener."""
 
     def test_hill_identity_added_on_insert(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """hill_formula is automatically attached as an IdentityRow."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc = make_calculation()
             session.add(calc)
             session.flush()
 
-            geom = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom = make_geometry_methane()
             session.add(geom)
             session.flush()
 
@@ -1013,60 +811,26 @@ class TestAddHillIdentity:
             session.add(stat_point)
             session.flush()
 
-            # Should have identities for InChI, SMILES, and hill_formula.
+            # Should have one identity per registered algorithm.
             assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
             hill_identity = _identity_for_algorithm(stat_point, "hill_formula")
             assert hill_identity.value == "CH4"  # Methane hill_formula
 
     def test_duplicate_hill_not_created(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Duplicate hill_formulas are not created for the same geometry."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
             # Create two identical geometries
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
-            geom2 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
+            geom1 = make_geometry_methane()
+            geom2 = make_geometry_methane()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -1085,49 +849,26 @@ class TestAddHillIdentity:
             assert hill1.id == hill2.id
             assert hill1.value == "CH4"
 
-            # Only 3 IdentityRows total (InChI, SMILES, hill_formula), shared
-            # between both stationary points.
+            # Only one IdentityRow per registered algorithm, shared between both
+            # stationary points.
             identity_count = len(session.exec(select(IdentityRow)).all())
             assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
 
     def test_different_hill_for_different_geometries(
-        self, database: Database, make_model_opt: Callable[[], ModelRow]
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different hill_formula identities."""
         with database.session() as session:
-            model = make_model_opt()
-            session.add(model)
-            session.flush()
-
-            calc1 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
-            calc2 = CalculationRow(
-                calc_type="opt",
-                model_id=model.id,
-                input_provenance={},
-                output_provenance={},
-            )
+            calc1, calc2 = make_calculation(), make_calculation()
             session.add_all([calc1, calc2])
             session.flush()
 
             # Methane
-            geom1 = GeometryRow(
-                symbols=["C", "H", "H", "H", "H"],
-                coordinates=[
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                    [0.0, 0.0, 1.0],
-                    [-1.0, 0.0, 0.0],
-                ],
-                charge=0,
-                spin=0,
-            )
-            # Ethane
+            geom1 = make_geometry_methane()
+            # Two carbons, no hydrogens
             geom2 = GeometryRow(
                 symbols=["C", "C"],
                 coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
@@ -1150,43 +891,24 @@ class TestAddHillIdentity:
             hill2 = _identity_for_algorithm(stat2, "hill_formula")
             assert hill1.id != hill2.id
             assert hill1.value == "CH4"
-            # Ethane hill_formula should be different from methane
+            # C2 hill_formula should be different from methane
             assert hill2.value != "CH4"
-
-
-def _water() -> GeometryRow:
-    return GeometryRow(
-        symbols=["O", "H", "H"],
-        coordinates=[[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],
-    )
-
-
-def _methane() -> GeometryRow:
-    return GeometryRow(
-        symbols=["C", "H", "H", "H", "H"],
-        coordinates=[
-            [0.0, 0.0, 0.0],
-            [0.63, 0.63, 0.63],
-            [-0.63, -0.63, 0.63],
-            [-0.63, 0.63, -0.63],
-            [0.63, -0.63, -0.63],
-        ],
-    )
-
-
-def _calculation() -> CalculationRow:
-    return CalculationRow(model=ModelRow(program="x", method="y"), calc_type="test")
 
 
 class TestVerifyPropertyValues:
     """Tests for verify_property_values_before_flush event listener."""
 
-    def test_integer_energy_stored_as_float64(self, database: Database) -> None:
+    def test_integer_energy_stored_as_float64(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """Integer energies are accepted and stored at full precision."""
         with database.session() as session:
             pv = PropertyValueRow(
-                geometry=_water(),
-                calculation=_calculation(),
+                geometry=make_geometry_water(),
+                calculation=make_calculation(),
                 property_kind_name="energy",
                 value=-1234.567891234,
             )
@@ -1204,10 +926,15 @@ class TestVerifyPropertyValues:
             assert float(pv.value) == -1234.567891234
             assert float(pv_int.value) == -1.0
 
-    def test_gradient_accepts_flat_and_matrix_shapes(self, database: Database) -> None:
+    def test_gradient_accepts_flat_and_matrix_shapes(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """Gradients may be flat ``(3N,)`` or ``(N, 3)``."""
         with database.session() as session:
-            geo, calc = _water(), _calculation()
+            geo, calc = make_geometry_water(), make_calculation()
             for value in (np.zeros(9), np.zeros((3, 3))):
                 session.add(
                     PropertyValueRow(
@@ -1229,14 +956,19 @@ class TestVerifyPropertyValues:
         ],
     )
     def test_invalid_shape_raises(
-        self, database: Database, kind: str, value: object
+        self,
+        database: Database,
+        kind: str,
+        value: object,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
     ) -> None:
         """Values with an invalid shape are rejected."""
         with database.session() as session:
             session.add(
                 PropertyValueRow(
-                    geometry=_water(),
-                    calculation=_calculation(),
+                    geometry=make_geometry_water(),
+                    calculation=make_calculation(),
                     property_kind_name=kind,
                     value=value,
                 )
@@ -1244,15 +976,20 @@ class TestVerifyPropertyValues:
             with pytest.raises(ValueError, match="expected shape"):
                 session.flush()
 
-    def test_property_kind_loaded_from_database(self, database: Database) -> None:
+    def test_property_kind_loaded_from_database(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """A `PropertyKindRow` loaded from the database validates values."""
         with database.session() as session:
             kind = session.get(PropertyKindRow, "energy")
             assert kind is not None
             session.add(
                 PropertyValueRow(
-                    geometry=_water(),
-                    calculation=_calculation(),
+                    geometry=make_geometry_water(),
+                    calculation=make_calculation(),
                     property_kind=kind,
                     value=[1.0, 2.0],
                 )
@@ -1264,20 +1001,32 @@ class TestVerifyPropertyValues:
 class TestVerifyValidStationaryHasHessian:
     """Tests for verify_valid_stationary_has_hessian event listener."""
 
-    def test_validated_without_hessian_raises(self, database: Database) -> None:
+    def test_validated_without_hessian_raises(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """A validated stationary point requires a Hessian."""
         with database.session() as session:
             stp = StationaryPointRow(
-                geometry=_water(), calculation=_calculation(), is_validated=True
+                geometry=make_geometry_water(),
+                calculation=make_calculation(),
+                is_validated=True,
             )
             session.add(stp)
             with pytest.raises(ValueError, match="without a Hessian"):
                 session.flush()
 
-    def test_validated_with_hessian(self, database: Database) -> None:
+    def test_validated_with_hessian(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """A validated stationary point with a Hessian is accepted."""
         with database.session() as session:
-            geo, calc = _water(), _calculation()
+            geo, calc = make_geometry_water(), make_calculation()
             hess = PropertyValueRow(
                 geometry=geo,
                 calculation=calc,
@@ -1294,12 +1043,14 @@ class TestVerifyValidStationaryHasHessian:
 class TestTrajectoryNdimPersisted:
     """The inferred trajectory ndim is written to the database."""
 
-    def test_inferred_ndim_persisted(self, database: Database) -> None:
+    def test_inferred_ndim_persisted(
+        self, database: Database, make_geometry_water: Callable[[], GeometryRow]
+    ) -> None:
         """`TrajectoryRow.ndim` inferred from a link index is persisted."""
         with database.session() as session:
             traj = TrajectoryRow()
             link = GeometryTrajectoryLink(
-                geometry=_water(), trajectory=traj, index=[0, 1]
+                geometry=make_geometry_water(), trajectory=traj, index=[0, 1]
             )
             session.add_all([traj, link])
             session.commit()
@@ -1314,7 +1065,9 @@ class TestTrajectoryNdimPersisted:
 class TestIdentityGenerationFailures:
     """Identity algorithms that fail are skipped with a warning."""
 
-    def test_metal_skips_unsupported_algorithms(self, database: Database) -> None:
+    def test_metal_skips_unsupported_algorithms(
+        self, database: Database, make_calculation: Callable[[], CalculationRow]
+    ) -> None:
         """Metal-containing geometries are stored with only supported identities."""
         with database.session() as session:
             geo = GeometryRow(
@@ -1322,7 +1075,7 @@ class TestIdentityGenerationFailures:
                 coordinates=[[0.0, 0.0, 0.0], [2.2, 0.0, 0.0], [-2.2, 0.0, 0.0]],
                 spin=4,
             )
-            stp = StationaryPointRow(geometry=geo, calculation=_calculation())
+            stp = StationaryPointRow(geometry=geo, calculation=make_calculation())
             session.add(stp)
             with pytest.warns(IdentityGenerationWarning, match="metals"):
                 session.commit()
@@ -1331,13 +1084,15 @@ class TestIdentityGenerationFailures:
                 ("hill_formula", "Cl2Fe")
             ]
 
-    def test_empty_identity_value_skipped(self, database: Database) -> None:
+    def test_empty_identity_value_skipped(
+        self, database: Database, make_calculation: Callable[[], CalculationRow]
+    ) -> None:
         """Empty identity values are not stored."""
         with database.session() as session:
             geo = GeometryRow(
                 symbols=["H", "H"], coordinates=[[0.0, 0.0, 0.0], [0.0, 0.0, 0.74]]
             )
-            stp = StationaryPointRow(geometry=geo, calculation=_calculation())
+            stp = StationaryPointRow(geometry=geo, calculation=make_calculation())
             session.add(stp)
             with pytest.warns(IdentityGenerationWarning, match="empty identity"):
                 session.commit()
@@ -1348,15 +1103,23 @@ class TestIdentityGenerationFailures:
 class TestIdentitiesOnGeometryChange:
     """Identities are regenerated when a stationary point's geometry changes."""
 
-    def test_reassigned_geometry_updates_identities(self, database: Database) -> None:
+    def test_reassigned_geometry_updates_identities(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_methane: Callable[[], GeometryRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """Reassigning `geometry` replaces the stationary point's identities."""
         with database.session() as session:
-            stp = StationaryPointRow(geometry=_water(), calculation=_calculation())
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
             session.add(stp)
             session.commit()
             assert "H2O" in {i.value for i in stp.identities}
 
-            stp.geometry = _methane()
+            stp.geometry = make_geometry_methane()
             session.commit()
 
             values = {i.value for i in stp.identities}
@@ -1367,12 +1130,17 @@ class TestIdentitiesOnGeometryChange:
 class TestPendingSiblingIdentities:
     """Stationary points added in the same flush share their identities."""
 
-    def test_same_flush_shares_identities(self, database: Database) -> None:
+    def test_same_flush_shares_identities(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """Equivalent stationary points in one flush reuse the same identities."""
         with database.session() as session:
-            calc = _calculation()
-            stp1 = StationaryPointRow(geometry=_water(), calculation=calc)
-            stp2 = StationaryPointRow(geometry=_water(), calculation=calc)
+            calc = make_calculation()
+            stp1 = StationaryPointRow(geometry=make_geometry_water(), calculation=calc)
+            stp2 = StationaryPointRow(geometry=make_geometry_water(), calculation=calc)
             session.add_all([stp1, stp2])
             session.commit()
 
@@ -1385,10 +1153,17 @@ class TestPendingSiblingIdentities:
 class TestListenerScope:
     """Listeners only apply to `AutostorageSession`s."""
 
-    def test_plain_session_has_no_listeners(self, database: Database) -> None:
+    def test_plain_session_has_no_listeners(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """A plain `sqlmodel.Session` does not attach identities."""
         with Session(database.engine) as session:
-            stp = StationaryPointRow(geometry=_water(), calculation=_calculation())
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
             session.add(stp)
             session.commit()
 
@@ -1398,11 +1173,16 @@ class TestListenerScope:
 class TestPersistedSiblingIdentities:
     """Child identities of persisted siblings are passed to algorithms."""
 
-    def test_sibling_smiles_reused(self, database: Database) -> None:
+    def test_sibling_smiles_reused(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
         """A new stationary point reuses its persisted sibling's SMILES."""
         with database.session() as session:
-            calc = _calculation()
-            stp1 = StationaryPointRow(geometry=_water(), calculation=calc)
+            calc = make_calculation()
+            stp1 = StationaryPointRow(geometry=make_geometry_water(), calculation=calc)
             session.add(stp1)
             session.commit()
 
@@ -1414,7 +1194,7 @@ class TestPersistedSiblingIdentities:
             )
             session.commit()
 
-            stp2 = StationaryPointRow(geometry=_water(), calculation=calc)
+            stp2 = StationaryPointRow(geometry=make_geometry_water(), calculation=calc)
             session.add(stp2)
             session.commit()
 
