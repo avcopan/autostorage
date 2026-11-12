@@ -149,8 +149,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing-inspection-0.4.5-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.1-pyh4616a5c_0.conda
-      - conda_source: autostorage[c84867b9] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[b9d6ea82] @ .
   dev:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -413,8 +413,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/uvicorn-0.54.0-pyh53cf698_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/uvicorn-standard-0.54.0-h6c8c7fd_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.2-pyh5ded981_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.1-pyh4616a5c_0.conda
-      - conda_source: autostorage[c84867b9] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[b9d6ea82] @ .
       - pypi: https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/15/d5/a8f9149b97cced9e1f4bff92ff0b6206120e2c853ae774d7020d6ecd8fa8/fqdn-1.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1a/69/ee613f74085ca7103f79cd08d579c4f3177d1d26e5d3d9528d2d6536a707/nbformat-5.11.1-py3-none-any.whl
@@ -626,8 +626,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing-inspection-0.4.5-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.1-pyh4616a5c_0.conda
-      - conda_source: autostorage[c84867b9] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[b9d6ea82] @ .
   test-lowest:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -778,8 +778,8 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.12.1-pyha770c72_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wcwidth-0.1.7-py_1.tar.bz2
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.1-pyh4616a5c_0.conda
-      - conda_source: autostorage[c84867b9] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[b9d6ea82] @ .
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2
   sha256: fe51de6107f9edc7aa4f786a70f4a883943bc9d39b3bb7307c04c41410990726
@@ -4576,8 +4576,7 @@ packages:
   - python-multipart
   - uvicorn-standard
   license: MIT
-  purls:
-  - pkg:pypi/fastapi?source=compressed-mapping
+  purls: []
   run_exports: {}
   size: 4955
   timestamp: 1794081739199
@@ -4625,7 +4624,7 @@ packages:
   - uvicorn-standard >=0.12.0
   license: MIT
   purls:
-  - pkg:pypi/fastapi?source=compressed-mapping
+  - pkg:pypi/fastapi?source=hash-mapping
   run_exports: {}
   size: 120255
   timestamp: 1794081739199
@@ -6510,9 +6509,9 @@ packages:
   run_exports: {}
   size: 24791
   timestamp: 1792622774790
-- conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.1-pyh4616a5c_0.conda
-  sha256: f1fc7d4c507219a2fa602038c8870b3e96729386071938386449bb80f8c13638
-  md5: 226a81287d3d0475daf1524ae92e3193
+- conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.2-pyh4616a5c_0.conda
+  sha256: 51703b22b58b93058e629dfa93b788df3be3477c3055f78138a960c5b8e1bf98
+  md5: 4b2945fd9cec9ab9950b6cb38c71bb94
   depends:
   - python >=3.13
   - python *
@@ -6525,13 +6524,13 @@ packages:
   - scipy >=1.15
   license: MIT
   run_exports: {}
-  size: 29557
-  timestamp: 1794361409840
-- conda_source: autostorage[c84867b9] @ .
+  size: 29632
+  timestamp: 1794518347724
+- conda_source: autostorage[b9d6ea82] @ .
   variants:
     target_platform: noarch
   depends:
-  - autogeom >=0.0.1
+  - autogeom >=0.0.2
   - python *
   - python >=3.13
   - sqlmodel >=0.0.31

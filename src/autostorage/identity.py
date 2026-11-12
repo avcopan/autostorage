@@ -16,6 +16,7 @@ __all__ = [
     "IdentityProtocol",
     "hill_formula",
     "rdkit_inchi",
+    "rdkit_inchi_conn",
     "rdkit_smiles",
 ]
 
@@ -102,6 +103,22 @@ class IdentityAlgorithmRegistry:
             available = ", ".join(sorted(a.name for a in cls.algorithms))
             msg = f"Unknown identity algorithm {name!r}. Available: {available}"
             raise KeyError(msg) from None
+
+
+def rdkit_inchi_conn_identity_fn(
+    geo: Geometry,
+    other_geos: OtherGeometries = None,  # noqa: ARG001
+) -> str:
+    """Generate a connectivity InChI string with RDKit."""
+    return autogeom.inchi(geo, stereo=False)
+
+
+rdkit_inchi_conn = IdentityAlgorithmRegistry.register(
+    name="rdkit_inchi_conn",
+    kind=IdentityKind.ISOMER,
+    identity_fn=rdkit_inchi_conn_identity_fn,
+)
+"""Connectivity InChI from RDKit (kind: isomer)."""
 
 
 def rdkit_inchi_identity_fn(

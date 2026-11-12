@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+- **`rdkit_inchi_conn`**: A built-in identity algorithm of kind `isomer`: the connectivity InChI, without stereo layers, from `autogeom.inchi(geo, stereo=False)`. Stereoisomers share one identity (e.g. cis- and trans-1,2-difluoroethene), which `rdkit_inchi` (kind `stereoisomer`) tells apart. Every new stationary point now gets four identities instead of three.
+
+### Changed
+- autostorage requires autogeom 0.0.2 or newer, which added the `stereo` option to `autogeom.inchi`.
 
 ## [0.0.21] - 2026-11-10
 ### Changed

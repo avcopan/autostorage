@@ -14,6 +14,7 @@ from autostorage.identity import (
     IdentityKind,
     hill_formula,
     rdkit_inchi,
+    rdkit_inchi_conn,
     rdkit_smiles,
 )
 
@@ -36,6 +37,38 @@ def methane() -> Geometry:
     return _geometry(
         ["C", "H", "H", "H", "H"],
         [[0, 0, 0], [r, r, r], [r, -r, -r], [-r, r, -r], [-r, -r, r]],
+    )
+
+
+@pytest.fixture
+def cis_difluoroethene() -> Geometry:
+    """Planar cis-1,2-difluoroethene sketch (C2H2F2)."""
+    return _geometry(
+        ["C", "C", "F", "H", "F", "H"],
+        [
+            [-0.6, 0, 0],
+            [0.6, 0, 0],
+            [-1.2, 1, 0],
+            [-1.2, -1, 0],
+            [1.2, 1, 0],
+            [1.2, -1, 0],
+        ],
+    )
+
+
+@pytest.fixture
+def trans_difluoroethene() -> Geometry:
+    """Planar trans-1,2-difluoroethene sketch (C2H2F2)."""
+    return _geometry(
+        ["C", "C", "F", "H", "F", "H"],
+        [
+            [-0.6, 0, 0],
+            [0.6, 0, 0],
+            [-1.2, 1, 0],
+            [-1.2, -1, 0],
+            [1.2, -1, 0],
+            [1.2, 1, 0],
+        ],
     )
 
 
@@ -89,6 +122,8 @@ class TestIdentityAlgorithmRegistry:
 
     def test_builtin_algorithms(self) -> None:
         """The built-in algorithms have the expected kinds and parents."""
+        assert rdkit_inchi_conn.kind is IdentityKind.ISOMER
+        assert rdkit_inchi_conn.parent is None
         assert rdkit_inchi.kind is IdentityKind.STEREOISOMER
         assert rdkit_inchi.parent is None
         assert rdkit_smiles.kind is IdentityKind.STEREOISOMER
@@ -115,6 +150,21 @@ class TestIdentityAlgorithm:
 
 class TestBuiltinIdentityFunctions:
     """Tests for the built-in identity functions."""
+
+    def test_rdkit_inchi_conn(self, water: Geometry, methane: Geometry) -> None:
+        """Connectivity InChI is generated from a geometry."""
+        assert rdkit_inchi_conn.identity_fn(water) == "InChI=1S/H2O/h1H2"
+        assert rdkit_inchi_conn.identity_fn(methane) == "InChI=1S/CH4/h1H4"
+
+    def test_rdkit_inchi_conn_ignores_stereo(
+        self, cis_difluoroethene: Geometry, trans_difluoroethene: Geometry
+    ) -> None:
+        """Stereoisomers share a connectivity InChI but not a standard InChI."""
+        conn = "InChI=1S/C2H2F2/c3-1-2-4/h1-2H"
+        assert rdkit_inchi_conn.identity_fn(cis_difluoroethene) == conn
+        assert rdkit_inchi_conn.identity_fn(trans_difluoroethene) == conn
+        assert rdkit_inchi.identity_fn(cis_difluoroethene) == f"{conn}/b2-1-"
+        assert rdkit_inchi.identity_fn(trans_difluoroethene) == f"{conn}/b2-1+"
 
     def test_rdkit_inchi(self, water: Geometry) -> None:
         """InChI is generated from a geometry."""
@@ -145,5 +195,6 @@ class TestBuiltinIdentityFunctions:
         """Identity functions accept `GeometryRow`s, including in `other_geos`."""
         row = GeometryRow(**water.model_dump())
         assert rdkit_inchi.identity_fn(row) == "InChI=1S/H2O/h1H2"
+        assert rdkit_inchi_conn.identity_fn(row) == "InChI=1S/H2O/h1H2"
         assert rdkit_smiles.identity_fn(row, {"[H]O[H]": row}) == "[H]O[H]"
         assert np.allclose(row.coordinates, water.coordinates)

@@ -11,16 +11,18 @@ Different algorithms partition at different resolutions, so the same stationary 
 
 ## Built-in algorithms
 
-autostorage registers three algorithms itself:
+autostorage registers the following algorithms itself:
 
 | algorithm | kind | parent | value |
 |---|---|---|---|
+| `rdkit_inchi_conn` | `isomer` | | Connectivity InChI (no stereo layers), from `autogeom.inchi(geo, stereo=False)` |
 | `rdkit_inchi` | `stereoisomer` | | Standard InChI, from `autogeom.inchi` |
 | `rdkit_smiles` | `stereoisomer` | `rdkit_inchi` | SMILES, from `autogeom.smiles` |
 | `hill_formula` | `formula` | `rdkit_inchi` | Formula in Hill order, from `autogeom.formula` |
 
 When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry is replaced.
 Stationary points with the same value share one `IdentityRow`.
+Stereoisomers such as cis- and trans-1,2-difluoroethene therefore share one `rdkit_inchi_conn` identity but have different `rdkit_inchi` identities.
 If an algorithm fails for a geometry (for example, InChI for a metal complex), an `IdentityGenerationWarning` is issued and that identity is skipped.
 
 Look stationary points up by identity with `query.stationary_point_by_identity`:

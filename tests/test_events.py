@@ -29,8 +29,7 @@ from autostorage.models import (
 # Test data constants
 NDIM_2 = 2
 NDIM_3 = 3
-EXPECTED_IDENTITY_COUNT_THREE = 3
-EXPECTED_IDENTITY_COUNT_SIX = 6
+EXPECTED_IDENTITY_COUNT = 4
 NATOMS_THREE = 3
 NATOMS_TWO = 2
 
@@ -63,6 +62,19 @@ def make_calculation() -> Callable[[], CalculationRow]:
 
 
 @pytest.fixture
+def make_geometry_water() -> Callable[[], GeometryRow]:
+    """Create factory for a water geometry (O, H, H)."""
+
+    def _make() -> GeometryRow:
+        return GeometryRow(
+            symbols=["O", "H", "H"],
+            coordinates=[[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],
+        )
+
+    return _make
+
+
+@pytest.fixture
 def make_geometry_methane() -> Callable[[], GeometryRow]:
     """Create factory for a methane geometry (C, H, H, H, H)."""
 
@@ -84,13 +96,44 @@ def make_geometry_methane() -> Callable[[], GeometryRow]:
 
 
 @pytest.fixture
-def make_geometry_water() -> Callable[[], GeometryRow]:
-    """Create factory for a water geometry (O, H, H)."""
+def make_geometry_trans_difluoroethene() -> Callable[[], GeometryRow]:
+    """Create factory for a planar trans-1,2-difluoroethene sketch (C2H2F2)."""
 
     def _make() -> GeometryRow:
         return GeometryRow(
-            symbols=["O", "H", "H"],
-            coordinates=[[0.0, 0.0, 0.0], [0.0, 0.76, 0.59], [0.0, -0.76, 0.59]],
+            symbols=["C", "C", "F", "H", "F", "H"],
+            coordinates=[
+                [-0.6, 0.0, 0.0],
+                [0.6, 0.0, 0.0],
+                [-1.2, 1.0, 0.0],
+                [-1.2, -1.0, 0.0],
+                [1.2, -1.0, 0.0],
+                [1.2, 1.0, 0.0],
+            ],
+            charge=0,
+            spin=0,
+        )
+
+    return _make
+
+
+@pytest.fixture
+def make_geometry_cis_difluoroethene() -> Callable[[], GeometryRow]:
+    """Create factory for a planar cis-1,2-difluoroethene sketch (C2H2F2)."""
+
+    def _make() -> GeometryRow:
+        return GeometryRow(
+            symbols=["C", "C", "F", "H", "F", "H"],
+            coordinates=[
+                [-0.6, 0.0, 0.0],
+                [0.6, 0.0, 0.0],
+                [-1.2, 1.0, 0.0],
+                [-1.2, -1.0, 0.0],
+                [1.2, 1.0, 0.0],
+                [1.2, -1.0, 0.0],
+            ],
+            charge=0,
+            spin=0,
         )
 
     return _make
@@ -537,6 +580,51 @@ def _identity_for_algorithm(
     return matches[0]
 
 
+class TestAddInchiConnIdentity:
+    """Test connectivity identities added by event listener."""
+
+    def test_inchi_conn_identity_added_on_insert(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_cis_difluoroethene: Callable[[], GeometryRow],
+        make_geometry_trans_difluoroethene: Callable[[], GeometryRow],
+    ) -> None:
+        """InChI identity is automatically attached to a new stationary point."""
+        with database.session() as session:
+            calc = make_calculation()
+            session.add(calc)
+            session.flush()
+
+            geom1 = make_geometry_cis_difluoroethene()
+            geom2 = make_geometry_trans_difluoroethene()
+            session.add_all([geom1, geom2])
+            session.flush()
+
+            stat_point1 = StationaryPointRow(
+                geometry_id=geom1.id, calculation_id=calc.id, order=0
+            )
+            stat_point2 = StationaryPointRow(
+                geometry_id=geom2.id, calculation_id=calc.id, order=0
+            )
+            session.add_all([stat_point1, stat_point2])
+            session.flush()
+
+            # Stereo identities should be distinct
+            identity_stereo1 = _identity_for_algorithm(stat_point1, "rdkit_inchi")
+            identity_stereo2 = _identity_for_algorithm(stat_point2, "rdkit_inchi")
+            assert identity_stereo1.id != identity_stereo2.id
+            assert identity_stereo1.value == "InChI=1S/C2H2F2/c3-1-2-4/h1-2H/b2-1-"
+            assert identity_stereo2.value == "InChI=1S/C2H2F2/c3-1-2-4/h1-2H/b2-1+"
+
+            # Connectivity identities should match
+            identity_conn1 = _identity_for_algorithm(stat_point1, "rdkit_inchi_conn")
+            identity_conn2 = _identity_for_algorithm(stat_point2, "rdkit_inchi_conn")
+            assert identity_conn1.id == identity_conn2.id
+            assert identity_conn1.algorithm.kind == "isomer"
+            assert identity_conn1.value == "InChI=1S/C2H2F2/c3-1-2-4/h1-2H"
+
+
 class TestAddInchiIdentity:
     """Tests for add_inchi_identity event listener."""
 
@@ -562,11 +650,11 @@ class TestAddInchiIdentity:
             session.add(stat_point)
             session.flush()
 
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
             identity = _identity_for_algorithm(stat_point, "rdkit_inchi")
             assert identity.algorithm.kind == "stereoisomer"
             assert identity.algorithm.name == "rdkit_inchi"
-            assert identity.value.startswith("InChI=")
+            assert identity.value == "InChI=1S/CH4/h1H4"
 
     def test_existing_inchi_identity_reused(
         self,
@@ -595,23 +683,24 @@ class TestAddInchiIdentity:
             session.add_all([stat1, stat2])
             session.flush()
 
-            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT_THREE
-            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT
             inchi1 = _identity_for_algorithm(stat1, "rdkit_inchi")
             inchi2 = _identity_for_algorithm(stat2, "rdkit_inchi")
             assert inchi1.id == inchi2.id
-            assert inchi1.value == inchi2.value
+            assert inchi1.value == "InChI=1S/CH4/h1H4"
 
             # Both stationary points share one identity per registered algorithm,
             # so there is only one IdentityRow per algorithm in total.
             identity_count = len(session.exec(select(IdentityRow)).all())
-            assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
+            assert identity_count == EXPECTED_IDENTITY_COUNT
 
     def test_different_geometries_create_different_identities(
         self,
         database: Database,
         make_calculation: Callable[[], CalculationRow],
         make_geometry_methane: Callable[[], GeometryRow],
+        make_geometry_water: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different InChI identities."""
         with database.session() as session:
@@ -620,12 +709,7 @@ class TestAddInchiIdentity:
             session.flush()
 
             geom1 = make_geometry_methane()
-            geom2 = GeometryRow(
-                symbols=["C", "C"],
-                coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
-                charge=0,
-                spin=0,
-            )
+            geom2 = make_geometry_water()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -638,17 +722,18 @@ class TestAddInchiIdentity:
             session.add_all([stat1, stat2])
             session.flush()
 
-            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT_THREE
-            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT
             inchi1 = _identity_for_algorithm(stat1, "rdkit_inchi")
             inchi2 = _identity_for_algorithm(stat2, "rdkit_inchi")
             assert inchi1.id != inchi2.id
-            assert inchi1.value != inchi2.value
+            assert inchi1.value == "InChI=1S/CH4/h1H4"
+            assert inchi2.value == "InChI=1S/H2O/h1H2"
 
             # Each stationary point has its own identity per registered
             # algorithm, none of which are shared.
             identity_count = len(session.exec(select(IdentityRow)).all())
-            assert identity_count == EXPECTED_IDENTITY_COUNT_SIX
+            assert identity_count == 2 * EXPECTED_IDENTITY_COUNT
 
     def test_inchi_identity_added_with_relationship_object(
         self,
@@ -670,11 +755,11 @@ class TestAddInchiIdentity:
             session.flush()
 
             # Identity should be auto-populated despite using relationship objects
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
             identity = _identity_for_algorithm(stat_point, "rdkit_inchi")
             assert identity.algorithm.kind == "stereoisomer"
             assert identity.algorithm.name == "rdkit_inchi"
-            assert identity.value.startswith("InChI=")
+            assert identity.value == "InChI=1S/CH4/h1H4"
 
 
 class TestAddSmilesIdentity:
@@ -703,7 +788,7 @@ class TestAddSmilesIdentity:
             session.flush()
 
             # Should have one identity per registered algorithm.
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
             smiles_identity = _identity_for_algorithm(stat_point, "rdkit_smiles")
             assert smiles_identity.value == "C"  # Methane SMILES
 
@@ -743,13 +828,14 @@ class TestAddSmilesIdentity:
             # Only one IdentityRow per registered algorithm, shared between both
             # stationary points.
             identity_count = len(session.exec(select(IdentityRow)).all())
-            assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
+            assert identity_count == EXPECTED_IDENTITY_COUNT
 
     def test_different_smiles_for_different_geometries(
         self,
         database: Database,
         make_calculation: Callable[[], CalculationRow],
         make_geometry_methane: Callable[[], GeometryRow],
+        make_geometry_water: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different SMILES identities."""
         with database.session() as session:
@@ -757,15 +843,8 @@ class TestAddSmilesIdentity:
             session.add_all([calc1, calc2])
             session.flush()
 
-            # Methane
             geom1 = make_geometry_methane()
-            # Two carbons, no hydrogens
-            geom2 = GeometryRow(
-                symbols=["C", "C"],
-                coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
-                charge=0,
-                spin=0,
-            )
+            geom2 = make_geometry_water()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -782,8 +861,7 @@ class TestAddSmilesIdentity:
             smiles2 = _identity_for_algorithm(stat2, "rdkit_smiles")
             assert smiles1.id != smiles2.id
             assert smiles1.value == "C"
-            # C2 SMILES should be different from methane
-            assert smiles2.value != "C"
+            assert smiles2.value == "O"
 
 
 class TestAddHillIdentity:
@@ -812,7 +890,7 @@ class TestAddHillIdentity:
             session.flush()
 
             # Should have one identity per registered algorithm.
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT_THREE
+            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
             hill_identity = _identity_for_algorithm(stat_point, "hill_formula")
             assert hill_identity.value == "CH4"  # Methane hill_formula
 
@@ -852,13 +930,14 @@ class TestAddHillIdentity:
             # Only one IdentityRow per registered algorithm, shared between both
             # stationary points.
             identity_count = len(session.exec(select(IdentityRow)).all())
-            assert identity_count == EXPECTED_IDENTITY_COUNT_THREE
+            assert identity_count == EXPECTED_IDENTITY_COUNT
 
     def test_different_hill_for_different_geometries(
         self,
         database: Database,
         make_calculation: Callable[[], CalculationRow],
         make_geometry_methane: Callable[[], GeometryRow],
+        make_geometry_water: Callable[[], GeometryRow],
     ) -> None:
         """Different geometries create different hill_formula identities."""
         with database.session() as session:
@@ -866,15 +945,8 @@ class TestAddHillIdentity:
             session.add_all([calc1, calc2])
             session.flush()
 
-            # Methane
             geom1 = make_geometry_methane()
-            # Two carbons, no hydrogens
-            geom2 = GeometryRow(
-                symbols=["C", "C"],
-                coordinates=[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]],
-                charge=0,
-                spin=0,
-            )
+            geom2 = make_geometry_water()
             session.add_all([geom1, geom2])
             session.flush()
 
@@ -891,8 +963,7 @@ class TestAddHillIdentity:
             hill2 = _identity_for_algorithm(stat2, "hill_formula")
             assert hill1.id != hill2.id
             assert hill1.value == "CH4"
-            # C2 hill_formula should be different from methane
-            assert hill2.value != "CH4"
+            assert hill2.value == "H2O"
 
 
 class TestVerifyPropertyValues:
@@ -1146,7 +1217,7 @@ class TestPendingSiblingIdentities:
 
             assert {i.id for i in stp1.identities} == {i.id for i in stp2.identities}
             assert len(session.exec(select(IdentityRow)).all()) == (
-                EXPECTED_IDENTITY_COUNT_THREE
+                EXPECTED_IDENTITY_COUNT
             )
 
 
