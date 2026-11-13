@@ -1,11 +1,11 @@
 """Identity algorithm registry with default definitions."""
 
-from collections.abc import Mapping
-from typing import ClassVar, Protocol, runtime_checkable
+from collections.abc import Iterable, Mapping
+from typing import ClassVar, Protocol, Self, runtime_checkable
 
 import autogeom
 from autogeom import Geometry
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from .types import IdentityKind
 
@@ -50,6 +50,29 @@ class IdentityAlgorithm(BaseModel):
     kind: IdentityKind
     identity_fn: IdentityProtocol
     parent: "IdentityAlgorithm | None" = None
+    orders: frozenset[int] | None = None
+
+    def applies_to(self, order: int) -> bool:
+        """Check whether algorithm applies to a given order."""
+        return self.orders is None or order in self.orders
+
+    @model_validator(mode="after")
+    def _check_parent_orders(self) -> Self:
+        """Require the orders to be a subset of the parent's orders."""
+        if self.parent is None or self.parent.orders is None:
+            return self
+
+        if self.orders is None or not self.orders <= self.parent.orders:
+            child = "all" if self.orders is None else sorted(self.orders)
+            parent = sorted(self.parent.orders)
+            msg = (
+                f"Orders {child} for child identity algorithm {self.name} "
+                f"are not compatible with orders {parent} of parent identity "
+                f"algorithm {self.parent.name}."
+            )
+            raise ValueError(msg)
+
+        return self
 
 
 class IdentityAlgorithmRegistry:
@@ -64,6 +87,7 @@ class IdentityAlgorithmRegistry:
         kind: IdentityKind,
         identity_fn: IdentityProtocol,
         parent: IdentityAlgorithm | None = None,
+        orders: Iterable[int] | None = None,
     ) -> IdentityAlgorithm:
         """Create and register an identity algorithm.
 
@@ -77,15 +101,21 @@ class IdentityAlgorithmRegistry:
             parent: Algorithm whose identity selects `other_geos`. If given,
                 `identity_fn` receives one geometry per existing identity value
                 among the stationary points that share the parent identity.
+            orders: Stationary-point orders the algorithm applies to (0 for
+                minima, 1 for saddle points, ...). If `None`, it applies to
+                every order. With a `parent`, they must be a subset of the
+                parent's orders.
 
         Raises:
-            ValueError: If an algorithm named `name` is already registered.
+            ValueError: If an algorithm named `name` is already registered, or
+                if `orders` isn't a subset of the parent's orders.
         """
         if any(name == a.name for a in cls.algorithms):
             msg = f"Identity algorithm {name!r} is already registered."
             raise ValueError(msg)
+        orders = None if orders is None else frozenset(orders)
         algorithm = IdentityAlgorithm(
-            name=name, kind=kind, identity_fn=identity_fn, parent=parent
+            name=name, kind=kind, identity_fn=identity_fn, parent=parent, orders=orders
         )
         cls.algorithms.append(algorithm)
         return algorithm
