@@ -8,18 +8,24 @@ else
   echo "You can install direnv and then run: direnv allow"
 fi
 
-# Initialize git repository
-git init -b main
-git add --all
-if git config --get user.name >/dev/null 2>&1 && git config --get user.email >/dev/null 2>&1; then
-  git commit -m "Initial commit"
+# Initialize git repository, unless this is already one (e.g. a clone of an existing project)
+if [[ -e .git ]]; then
+  NEW_REPO=false
+  echo "Already a Git repository: skipping git init and the initial commit."
 else
-  echo "Warning: Git author identity is not configured."
-  echo "You can configure it as follows:"
-  echo '  git config --global user.name "Your Name"'
-  echo '  git config --global user.email "you@example.com"'
-  echo "Afterwards, you can make the initial commit with:"
-  echo '  git commit -m "Initial commit"'
+  NEW_REPO=true
+  git init -b main
+  git add --all
+  if git config --get user.name >/dev/null 2>&1 && git config --get user.email >/dev/null 2>&1; then
+    git commit -m "Initial commit"
+  else
+    echo "Warning: Git author identity is not configured."
+    echo "You can configure it as follows:"
+    echo '  git config --global user.name "Your Name"'
+    echo '  git config --global user.email "you@example.com"'
+    echo "Afterwards, you can make the initial commit with:"
+    echo '  git commit -m "Initial commit"'
+  fi
 fi
 
 # Install git hooks with lefthook
@@ -61,10 +67,12 @@ if [[ -z "$(git config --global merge.tool || true)" ]]; then
 fi
 
 echo "Setup complete."
-echo
-echo "Now, run the following commands to set up your remote repository:"
-echo "  git remote add origin git@github.com:avcopan/autostorage.git"
-echo "  git push -u origin main"
-echo
-echo "Then, link your documentation site under 'About' on your GitHub repository site"
-echo "(see https://github.com/avcopan/copier-pixi-python#initialize-local-repository)."
+if $NEW_REPO; then
+  echo
+  echo "Now, run the following commands to set up your remote repository:"
+  echo "  git remote add origin git@github.com:avcopan/autostorage.git"
+  echo "  git push -u origin main"
+  echo
+  echo "Then, link your documentation site under 'About' on your GitHub repository site"
+  echo "(see https://github.com/avcopan/copier-pixi-python#initialize-local-repository)."
+fi
