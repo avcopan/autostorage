@@ -1,6 +1,7 @@
 """Models module tests."""
 
 import tempfile
+import uuid
 from collections.abc import Generator
 from pathlib import Path
 
@@ -402,7 +403,7 @@ class TestCalculationRow:
     def test_calculation_requires_model(self, database: Database) -> None:
         """CalculationRow requires a valid model_id."""
         with database.session() as session:
-            calc = CalculationRow(model_id=9999, calc_type="energy")
+            calc = CalculationRow(model_id=uuid.uuid4(), calc_type="energy")
             session.add(calc)
 
             with pytest.raises(IntegrityError):
@@ -640,8 +641,9 @@ class TestStepRow:
     def test_create_step_with_ts(self, database: Database) -> None:
         """StepRow can be created with a transition state."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1, stage2 = sorted(
+                [StageRow(is_ts=False), StageRow(is_ts=False)], key=lambda s: str(s.id)
+            )
             stage_ts = StageRow(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
@@ -692,8 +694,9 @@ class TestStepRow:
     def test_step_stage_relationships(self, database: Database) -> None:
         """StepRow stage relationships work correctly."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1, stage2 = sorted(
+                [StageRow(is_ts=False), StageRow(is_ts=False)], key=lambda s: str(s.id)
+            )
             stage_ts = StageRow(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()

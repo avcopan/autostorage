@@ -315,7 +315,7 @@ def _sibling_geometries(
     """
     siblings = dict(ctx.pending_siblings.get((parent_key, algorithm_name), {}))
     parent_ident = ctx.cache[parent_key]
-    if parent_ident.id is None:
+    if parent_ident in ctx.session.new:
         return siblings
 
     ident = aliased(IdentityRow)

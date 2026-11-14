@@ -234,7 +234,7 @@ class TestDatabaseIntegration:
         with database.session() as session:
             # Try to create a link with non-existent geometry_id
             link = CalculationGeometryLink(
-                calculation_id=9999,  # Non-existent
+                calculation_id=uuid.uuid4(),  # Non-existent
                 geometry_id=uuid.uuid4(),  # Non-existent
                 role="input",
             )

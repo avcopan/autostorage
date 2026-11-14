@@ -145,16 +145,11 @@ class TestSortStepStageIds:
     def test_stage_ids_sorted_on_insert(self, database: Database) -> None:
         """stage_id1 and stage_id2 are auto-sorted on insert."""
         with database.session() as session:
-            # Create two stages (stage1 gets smaller id)
-            stage_small = StageRow(is_ts=False)
-            stage_large = StageRow(is_ts=False)
-            session.add_all([stage_small, stage_large])
+            # Create two stages, named by the order of their ids
+            stages = [StageRow(is_ts=False) for _ in range(2)]
+            session.add_all(stages)
             session.flush()
-
-            # stage_large.id should be > stage_small.id
-            assert stage_large.id is not None
-            assert stage_small.id is not None
-            assert stage_large.id > stage_small.id
+            stage_small, stage_large = sorted(stages, key=lambda s: str(s.id))
 
             # Create step with reversed stage IDs (large first, then small)
             step = StepRow(
@@ -175,18 +170,11 @@ class TestSortStepStageIds:
     def test_stage_ids_sorted_on_update(self, database: Database) -> None:
         """stage_id1 and stage_id2 are auto-sorted on update."""
         with database.session() as session:
-            # Create three stages
-            stage_a = StageRow(is_ts=False)
-            stage_b = StageRow(is_ts=False)
-            stage_c = StageRow(is_ts=False)
-            session.add_all([stage_a, stage_b, stage_c])
+            # Create three stages, named so that A < B < C
+            stages = [StageRow(is_ts=False) for _ in range(3)]
+            session.add_all(stages)
             session.flush()
-
-            # Ensure A < B < C
-            assert stage_a.id is not None
-            assert stage_b.id is not None
-            assert stage_c.id is not None
-            assert stage_a.id < stage_b.id < stage_c.id
+            stage_a, stage_b, stage_c = sorted(stages, key=lambda s: str(s.id))
 
             # Create step with correct order (A, B)
             step = StepRow(
@@ -232,17 +220,11 @@ class TestSortStepStageIds:
     def test_sorting_three_stage_ids(self, database: Database) -> None:
         """Sorting works with three different stages."""
         with database.session() as session:
-            # Create three stages
-            stage_x = StageRow(is_ts=False)
-            stage_y = StageRow(is_ts=False)
-            stage_z = StageRow(is_ts=False)
-            session.add_all([stage_x, stage_y, stage_z])
+            # Create three stages, named so that X < Y < Z
+            stages = [StageRow(is_ts=False) for _ in range(3)]
+            session.add_all(stages)
             session.flush()
-
-            # X < Y < Z
-            assert stage_x.id is not None
-            assert stage_y.id is not None
-            assert stage_z.id is not None
+            stage_x, _, stage_z = sorted(stages, key=lambda s: str(s.id))
 
             # Create step with reversed order (Z, X)
             step = StepRow(

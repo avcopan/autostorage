@@ -72,7 +72,7 @@ class CalculationGeometryLink(SQLModel, table=True):
 
     geometry_id: uuid.UUID | None = _link_fk_field("geometry.id")
     """Foreign key to the linked `GeometryRow`."""
-    calculation_id: int | None = _link_fk_field("calculation.id")
+    calculation_id: uuid.UUID | None = _link_fk_field("calculation.id")
     """Foreign key to the linked `CalculationRow`."""
     role: Role = Field(sa_column=_role_column())
     """Role the `GeometryRow` plays for `CalculationRow` (input/output)."""
@@ -92,7 +92,7 @@ class GeometryTrajectoryLink(SQLModel, table=True):
 
     geometry_id: uuid.UUID | None = _link_fk_field("geometry.id")
     """Foreign key to the linked `GeometryRow`."""
-    trajectory_id: int | None = _link_fk_field("trajectory.id")
+    trajectory_id: uuid.UUID | None = _link_fk_field("trajectory.id")
     """Foreign key to the linked `TrajectoryRow`."""
     index: list[int] | None = Field(default=None, sa_column=Column(JSON))
     """Position of `geometry` within the `trajectory`."""
@@ -110,9 +110,9 @@ class CalculationTrajectoryLink(SQLModel, table=True):
         Index("ix_calculation_trajectory_link_calculation_id", "calculation_id"),
     )
 
-    trajectory_id: int | None = _link_fk_field("trajectory.id")
+    trajectory_id: uuid.UUID | None = _link_fk_field("trajectory.id")
     """Foreign key to the linked `TrajectoryRow`."""
-    calculation_id: int | None = _link_fk_field("calculation.id")
+    calculation_id: uuid.UUID | None = _link_fk_field("calculation.id")
     """Foreign key to the linked `CalculationRow`."""
     role: Role = Field(sa_column=_role_column())
     """Role the `TrajectoryRow` plays for `CalculationRow` (input/output)."""
@@ -132,9 +132,9 @@ class StageStationaryLink(SQLModel, table=True):
     __tablename__ = "stage_stationary_link"
     __table_args__ = (Index("ix_stage_stationary_link_stage_id", "stage_id"),)
 
-    stationary_id: int | None = _link_fk_field("stationary_point.id")
+    stationary_id: uuid.UUID | None = _link_fk_field("stationary_point.id")
     """Foreign key to the linked `StationaryPointRow`."""
-    stage_id: int | None = _link_fk_field("stage.id")
+    stage_id: uuid.UUID | None = _link_fk_field("stage.id")
     """Foreign key to the linked `StageRow`."""
 
 
@@ -148,9 +148,9 @@ class StepValidationLink(SQLModel, table=True):
     __tablename__ = "step_validation_link"
     __table_args__ = (Index("ix_step_validation_link_validation_id", "validation_id"),)
 
-    step_id: int | None = _link_fk_field("step.id")
+    step_id: uuid.UUID | None = _link_fk_field("step.id")
     """Foreign key to the linked `StepRow`."""
-    validation_id: int | None = _link_fk_field("validation.id")
+    validation_id: uuid.UUID | None = _link_fk_field("validation.id")
     """Foreign key to the linked `ValidationRow`."""
 
 
@@ -164,9 +164,9 @@ class IdentityStationaryLink(SQLModel, table=True):
     __tablename__ = "identity_stationary_link"
     __table_args__ = (Index("ix_identity_stationary_link_identity_id", "identity_id"),)
 
-    stationary_id: int | None = _link_fk_field("stationary_point.id")
+    stationary_id: uuid.UUID | None = _link_fk_field("stationary_point.id")
     """Foreign key to the linked `StationaryPointRow`."""
-    identity_id: int | None = _link_fk_field("identity.id")
+    identity_id: uuid.UUID | None = _link_fk_field("identity.id")
     """Foreign key to the linked `IdentityRow`."""
 
 
@@ -235,7 +235,7 @@ class TrajectoryRow(SQLModel, table=True):
 
     __tablename__ = "trajectory"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     ndim: int | None = Field(default=None, nullable=True)
 
     geometry_links: list["GeometryTrajectoryLink"] = Relationship(
@@ -339,7 +339,7 @@ class ModelRow(SQLModel, table=True):
 
     __tablename__ = "model"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     program: str
     program_version: str | None = None
     method: str
@@ -371,8 +371,8 @@ class CalculationRow(SQLModel, table=True):
 
     __tablename__ = "calculation"
 
-    id: int | None = Field(default=None, primary_key=True)
-    model_id: int | None = _fk_field("model.id")
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
+    model_id: uuid.UUID | None = _fk_field("model.id")
     calc_type: str
     input_provenance: dict[str, Any] | None = Field(
         default_factory=dict, sa_column=_json_dict_column()
@@ -426,7 +426,7 @@ class PropertyValueRow(SQLModel, table=True):
     """Foreign key to the linked `GeometryRow`."""
     geometry: "GeometryRow" = Relationship(back_populates="properties")
     """The linked `GeometryRow`."""
-    calculation_id: int | None = _fk_field("calculation.id")
+    calculation_id: uuid.UUID | None = _fk_field("calculation.id")
     """Foreign key to the linked `CalculationRow`."""
     calculation: "CalculationRow" = Relationship(back_populates="properties")
     """The linked `CalculationRow`."""
@@ -456,8 +456,8 @@ class ValidationRow(SQLModel, table=True):
 
     __tablename__ = "validation"
 
-    id: int | None = Field(default=None, primary_key=True)
-    calculation_id: int | None = _fk_field("calculation.id")
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
+    calculation_id: uuid.UUID | None = _fk_field("calculation.id")
 
     method: str
     extras: dict[str, Any] = Field(default_factory=dict, sa_column=_json_dict_column())
@@ -488,9 +488,9 @@ class StationaryPointRow(SQLModel, table=True):
 
     __tablename__ = "stationary_point"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     geometry_id: uuid.UUID | None = _fk_field("geometry.id")
-    calculation_id: int | None = _fk_field("calculation.id")
+    calculation_id: uuid.UUID | None = _fk_field("calculation.id")
     order: int = 0
     is_pseudo: bool = False
     is_validated: bool = False
@@ -522,7 +522,7 @@ class StageRow(SQLModel, table=True):
 
     __tablename__ = "stage"
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     is_ts: bool = False
 
     stationaries: list["StationaryPointRow"] = Relationship(
@@ -556,19 +556,19 @@ class StepRow(SQLModel, table=True):
             "unq_step_stages_null_safe",
             "stage_id1",
             "stage_id2",
-            text("coalesce(stage_id_ts, 0)"),
+            text("coalesce(stage_id_ts, '')"),
             unique=True,
         ),
     )
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     """Primary key."""
     # Lookups by `stage_id1` use the unique indexes above (leading column)
-    stage_id1: int | None = _fk_field("stage.id", index=False)
+    stage_id1: uuid.UUID | None = _fk_field("stage.id", index=False)
     """The step's first non-TS stage (reactant or product)."""
-    stage_id2: int | None = _fk_field("stage.id")
+    stage_id2: uuid.UUID | None = _fk_field("stage.id")
     """The step's second non-TS stage (reactant or product)."""
-    stage_id_ts: int | None = _fk_field("stage.id", nullable=True)
+    stage_id_ts: uuid.UUID | None = _fk_field("stage.id", nullable=True)
     """The step's TS stage."""
     is_barrierless: bool = False
     """Whether this step proceeds without a formal TS."""
@@ -637,7 +637,7 @@ class IdentityRow(SQLModel, table=True):
         UniqueConstraint("algorithm_name", "value", name="unique_identity"),
     )
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     algorithm_name: str | None = _fk_field("identity_algorithm.name")
     value: str
 
