@@ -22,7 +22,8 @@ The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier 
 - A trajectory's `ndim` is inferred from its geometry indices if unset.
 
 Nothing commits automatically: call `session.commit()`.
-Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians).
+Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians), and `IdentityStationaryLink.identity_cache` as zlib-compressed JSON by `CompressedJSONTypeDecorator`.
+Identities are reached through link rows (`StationaryPointRow.identity_links`, `IdentityRow.stationary_links`); removing a link from either list deletes it.
 
 ## Style
 

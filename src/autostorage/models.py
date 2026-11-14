@@ -22,7 +22,12 @@ from sqlmodel import (
 )
 from sqlmodel.main import SQLModelConfig
 
-from .types import CompressedArrayTypeDecorator, IdentityKind, Role
+from .types import (
+    CompressedArrayTypeDecorator,
+    CompressedJSONTypeDecorator,
+    IdentityKind,
+    Role,
+)
 
 
 def _fk_field(
@@ -157,8 +162,8 @@ class StepValidationLink(SQLModel, table=True):
 class IdentityStationaryLink(SQLModel, table=True):
     """Association table linking chemical identities to stationary points.
 
-    Relationships are managed via `StationaryPointRow.identities` and
-    `IdentityRow.stationary_points`, using this table as their `link_model`.
+    Removing a link from `StationaryPointRow.identity_links` or
+    `IdentityRow.stationary_links` deletes it.
     """
 
     __tablename__ = "identity_stationary_link"
@@ -168,6 +173,20 @@ class IdentityStationaryLink(SQLModel, table=True):
     """Foreign key to the linked `StationaryPointRow`."""
     identity_id: uuid.UUID | None = _link_fk_field("identity.id")
     """Foreign key to the linked `IdentityRow`."""
+    identity_cache: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(MutableDict.as_mutable(CompressedJSONTypeDecorator())),
+    )
+    """Data that makes generating identities cheaper (e.g. graph isomorphisms).
+
+    Stored as zlib-compressed JSON. Only top-level key changes are tracked in
+    place; reassign the dict after editing nested values. Discarded with the
+    link when the stationary point's geometry changes.
+    """
+    stationary: "StationaryPointRow" = Relationship(back_populates="identity_links")
+    """The linked `StationaryPointRow`."""
+    identity: "IdentityRow" = Relationship(back_populates="stationary_links")
+    """The linked `IdentityRow`."""
 
 
 # 1. Existential data rows
@@ -482,7 +501,8 @@ class StationaryPointRow(SQLModel, table=True):
             calculation).
         geometry: Geometry defining the coordinates of this point.
         calculation: Calculation that identified this point.
-        identities: Chemical identifiers (e.g. InChI, SMILES) for this point.
+        identity_links: Link rows to this point's chemical identifiers (e.g. InChI,
+            SMILES), each with its `identity_cache`.
         stages: Reaction stages this stationary point belongs to.
     """
 
@@ -497,8 +517,8 @@ class StationaryPointRow(SQLModel, table=True):
 
     geometry: "GeometryRow" = Relationship(back_populates="stationary_points")
     calculation: "CalculationRow" = Relationship(back_populates="stationary_points")
-    identities: list["IdentityRow"] = Relationship(
-        back_populates="stationary_points", link_model=IdentityStationaryLink
+    identity_links: list["IdentityStationaryLink"] = Relationship(
+        back_populates="stationary", cascade_delete=True
     )
     stages: list["StageRow"] = Relationship(
         back_populates="stationaries", link_model=StageStationaryLink
@@ -629,7 +649,7 @@ class IdentityRow(SQLModel, table=True):
             smiles``); its ``kind`` gives the category (e.g. ``stereoisomer``,
             ``formula``).
         value: The resulting identifier string.
-        stationary_points: Stationary points sharing this identity.
+        stationary_links: Link rows to the stationary points sharing this identity.
     """
 
     __tablename__ = "identity"
@@ -642,6 +662,6 @@ class IdentityRow(SQLModel, table=True):
     value: str
 
     algorithm: "IdentityAlgorithmRow" = Relationship(back_populates="identities")
-    stationary_points: list["StationaryPointRow"] = Relationship(
-        back_populates="identities", link_model=IdentityStationaryLink
+    stationary_links: list["IdentityStationaryLink"] = Relationship(
+        back_populates="identity", cascade_delete=True
     )

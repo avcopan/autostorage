@@ -5,7 +5,11 @@ import zlib
 import numpy as np
 import pytest
 
-from autostorage.types import CompressedArrayTypeDecorator, _decompress
+from autostorage.types import (
+    CompressedArrayTypeDecorator,
+    CompressedJSONTypeDecorator,
+    _decompress,
+)
 
 
 def test_decompress_limit() -> None:
@@ -37,3 +41,13 @@ def test_array_decorator_preserves_dtype(dtype: type[np.floating]) -> None:
     assert loaded is not None
     assert loaded.dtype == dtype
     np.testing.assert_array_equal(loaded, value)
+
+
+@pytest.mark.parametrize("value", [None, {}, {"a": [1, 2.5, None], "b": {"c": "d"}}])
+def test_json_decorator_round_trip(value: object) -> None:
+    """JSON values survive a compress/decompress round trip."""
+    decorator = CompressedJSONTypeDecorator()
+
+    stored = decorator.process_bind_param(value, None)
+
+    assert decorator.process_result_value(stored, None) == value

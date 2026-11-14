@@ -17,6 +17,7 @@ from autostorage.models import (
     GeometryRow,
     GeometryTrajectoryLink,
     IdentityRow,
+    IdentityStationaryLink,
     ModelRow,
     PropertyKindRow,
     PropertyValueRow,
@@ -549,17 +550,29 @@ class TestVerifyTrajectoryGeometryNdim:
             assert link2.index == [1, 2]
 
 
+def _identities(stat_point: StationaryPointRow) -> list[IdentityRow]:
+    """Return the identities linked to `stat_point`."""
+    return [link.identity for link in stat_point.identity_links]
+
+
+def _link_for_algorithm(
+    stat_point: StationaryPointRow, algorithm_name: str
+) -> IdentityStationaryLink:
+    """Return the single identity link of `stat_point` for `algorithm_name`."""
+    matches = [
+        link
+        for link in stat_point.identity_links
+        if link.identity.algorithm_name == algorithm_name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _identity_for_algorithm(
     stat_point: StationaryPointRow, algorithm_name: str
 ) -> IdentityRow:
     """Return the single identity attached to `stat_point` for `algorithm_name`."""
-    matches = [
-        ident
-        for ident in stat_point.identities
-        if ident.algorithm.name == algorithm_name
-    ]
-    assert len(matches) == 1
-    return matches[0]
+    return _link_for_algorithm(stat_point, algorithm_name).identity
 
 
 class TestAddInchiConnIdentity:
@@ -632,7 +645,7 @@ class TestAddInchiIdentity:
             session.add(stat_point)
             session.flush()
 
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat_point)) == EXPECTED_IDENTITY_COUNT
             identity = _identity_for_algorithm(stat_point, "rdkit_inchi")
             assert identity.algorithm.kind == "stereoisomer"
             assert identity.algorithm.name == "rdkit_inchi"
@@ -665,8 +678,8 @@ class TestAddInchiIdentity:
             session.add_all([stat1, stat2])
             session.flush()
 
-            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT
-            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat1)) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat2)) == EXPECTED_IDENTITY_COUNT
             inchi1 = _identity_for_algorithm(stat1, "rdkit_inchi")
             inchi2 = _identity_for_algorithm(stat2, "rdkit_inchi")
             assert inchi1.id == inchi2.id
@@ -704,8 +717,8 @@ class TestAddInchiIdentity:
             session.add_all([stat1, stat2])
             session.flush()
 
-            assert len(stat1.identities) == EXPECTED_IDENTITY_COUNT
-            assert len(stat2.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat1)) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat2)) == EXPECTED_IDENTITY_COUNT
             inchi1 = _identity_for_algorithm(stat1, "rdkit_inchi")
             inchi2 = _identity_for_algorithm(stat2, "rdkit_inchi")
             assert inchi1.id != inchi2.id
@@ -737,7 +750,7 @@ class TestAddInchiIdentity:
             session.flush()
 
             # Identity should be auto-populated despite using relationship objects
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat_point)) == EXPECTED_IDENTITY_COUNT
             identity = _identity_for_algorithm(stat_point, "rdkit_inchi")
             assert identity.algorithm.kind == "stereoisomer"
             assert identity.algorithm.name == "rdkit_inchi"
@@ -770,7 +783,7 @@ class TestAddSmilesIdentity:
             session.flush()
 
             # Should have one identity per registered algorithm.
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat_point)) == EXPECTED_IDENTITY_COUNT
             smiles_identity = _identity_for_algorithm(stat_point, "rdkit_smiles")
             assert smiles_identity.value == "C"  # Methane SMILES
 
@@ -872,7 +885,7 @@ class TestAddHillIdentity:
             session.flush()
 
             # Should have one identity per registered algorithm.
-            assert len(stat_point.identities) == EXPECTED_IDENTITY_COUNT
+            assert len(_identities(stat_point)) == EXPECTED_IDENTITY_COUNT
             hill_identity = _identity_for_algorithm(stat_point, "hill_formula")
             assert hill_identity.value == "CH4"  # Methane hill_formula
 
@@ -1133,7 +1146,7 @@ class TestIdentityGenerationFailures:
             with pytest.warns(IdentityGenerationWarning, match="metals"):
                 session.commit()
 
-            assert [(i.algorithm.name, i.value) for i in stp.identities] == [
+            assert [(i.algorithm.name, i.value) for i in _identities(stp)] == [
                 ("hill_formula", "Cl2Fe")
             ]
 
@@ -1150,7 +1163,7 @@ class TestIdentityGenerationFailures:
             with pytest.warns(IdentityGenerationWarning, match="empty identity"):
                 session.commit()
 
-            assert all(ident.value for ident in stp.identities)
+            assert all(ident.value for ident in _identities(stp))
 
 
 class TestIdentitiesOnGeometryChange:
@@ -1170,14 +1183,39 @@ class TestIdentitiesOnGeometryChange:
             )
             session.add(stp)
             session.commit()
-            assert "H2O" in {i.value for i in stp.identities}
+            assert "H2O" in {i.value for i in _identities(stp)}
 
             stp.geometry = make_geometry_methane()
             session.commit()
 
-            values = {i.value for i in stp.identities}
+            values = {i.value for i in _identities(stp)}
             assert "CH4" in values
             assert "H2O" not in values
+
+    def test_reassigned_geometry_discards_identity_cache(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """Relinking the same identities after a geometry change resets the cache."""
+        with database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+            ids_before = {ident.id for ident in _identities(stp)}
+            for link in stp.identity_links:
+                link.identity_cache = {"stale": True}
+            session.commit()
+
+            stp.geometry = make_geometry_water()
+            session.commit()
+            session.expire_all()
+
+            assert {ident.id for ident in _identities(stp)} == ids_before
+            assert all(link.identity_cache is None for link in stp.identity_links)
 
 
 class TestPendingSiblingIdentities:
@@ -1197,7 +1235,9 @@ class TestPendingSiblingIdentities:
             session.add_all([stp1, stp2])
             session.commit()
 
-            assert {i.id for i in stp1.identities} == {i.id for i in stp2.identities}
+            assert {i.id for i in _identities(stp1)} == {
+                i.id for i in _identities(stp2)
+            }
             assert len(session.exec(select(IdentityRow)).all()) == (
                 EXPECTED_IDENTITY_COUNT
             )
@@ -1220,7 +1260,7 @@ class TestListenerScope:
             session.add(stp)
             session.commit()
 
-            assert stp.identities == []
+            assert stp.identity_links == []
 
 
 class TestPersistedSiblingIdentities:
@@ -1240,10 +1280,12 @@ class TestPersistedSiblingIdentities:
             session.commit()
 
             # Replace the canonical SMILES with an equivalent, non-canonical one
-            smiles = _identity_for_algorithm(stp1, "rdkit_smiles")
-            stp1.identities.remove(smiles)
-            stp1.identities.append(
-                IdentityRow(algorithm_name=smiles.algorithm_name, value="[H]O[H]")
+            smiles_link = _link_for_algorithm(stp1, "rdkit_smiles")
+            stp1.identity_links.remove(smiles_link)
+            stp1.identity_links.append(
+                IdentityStationaryLink(
+                    identity=IdentityRow(algorithm_name="rdkit_smiles", value="[H]O[H]")
+                )
             )
             session.commit()
 

@@ -139,9 +139,9 @@ with db.session() as session:
     # `add_inchi_identities_before_flush` already attached an InChI identity to
     # each stationary point during the flush above; reactant and product share
     # the same chemical identity since this inversion is degenerate.
-    assert stat_reactant.identities
-    assert {i.value for i in stat_reactant.identities} == {
-        i.value for i in stat_product.identities
+    assert stat_reactant.identity_links
+    assert {link.identity.value for link in stat_reactant.identity_links} == {
+        link.identity.value for link in stat_product.identity_links
     }
 
     # Stages: one per stationary point, plus the transition-state stage.

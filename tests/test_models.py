@@ -1,7 +1,9 @@
 """Models module tests."""
 
+import json
 import tempfile
 import uuid
+import zlib
 from collections.abc import Generator
 from pathlib import Path
 
@@ -10,7 +12,7 @@ import pint
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import col, select
+from sqlmodel import Session, col, select, text
 
 from autostorage import (
     energy_property_kind,
@@ -562,7 +564,7 @@ class TestStationaryPointRow:
             assert stp.geometry_id == water.id
             assert stp.calculation_id == calculation.id
 
-            assert len(stp.identities) >= 1  # Auto-populated
+            assert len(stp.identity_links) >= 1  # Auto-populated
 
     def test_create_transition_state(
         self,
@@ -780,7 +782,7 @@ class TestIdentityRow:
             session.add(identity)
             session.commit()
 
-            assert identity.stationary_points == []
+            assert identity.stationary_links == []
 
 
 class TestLinkModels:
@@ -950,6 +952,69 @@ class TestLinkModels:
 
             assert link.stationary_id == stat_pt.id
             assert link.identity_id == identity.id
+            assert link.identity_cache is None
+
+    @pytest.fixture
+    def identity_link(
+        self, database: Database, calculation: CalculationRow, water: GeometryRow
+    ) -> Generator[tuple[Session, IdentityStationaryLink]]:
+        """An auto-generated identity link of a committed stationary point."""
+        with database.session() as session:
+            stp = StationaryPointRow(geometry=water, calculation=calculation)
+            session.add(stp)
+            session.commit()
+            yield session, stp.identity_links[0]
+
+    def test_identity_cache_round_trip(
+        self, identity_link: tuple[Session, IdentityStationaryLink]
+    ) -> None:
+        """`identity_cache` is stored compressed and read back as a dict."""
+        session, link = identity_link
+        cache = {"graph": [[0, 1], [0, 2]], "hash": "abc"}
+        link.identity_cache = cache
+        session.commit()
+        session.expire_all()
+
+        assert link.identity_cache == cache
+        assert link.identity_id is not None
+        raw = (
+            session.connection()
+            .execute(
+                text(
+                    "SELECT identity_cache FROM identity_stationary_link "
+                    "WHERE identity_id = :id"
+                ).bindparams(id=link.identity_id.hex)
+            )
+            .one()[0]
+        )
+        assert json.loads(zlib.decompress(raw)) == cache
+
+    def test_identity_cache_in_place_change_persists(
+        self, identity_link: tuple[Session, IdentityStationaryLink]
+    ) -> None:
+        """Setting a key of `identity_cache` in place is saved."""
+        session, link = identity_link
+        link.identity_cache = {"a": 1}
+        session.commit()
+        assert link.identity_cache is not None
+        link.identity_cache["b"] = 2
+        session.commit()
+        session.expire_all()
+
+        assert link.identity_cache == {"a": 1, "b": 2}
+
+    def test_removing_identity_link_deletes_it(
+        self, identity_link: tuple[Session, IdentityStationaryLink]
+    ) -> None:
+        """A link removed from its stationary point's links is deleted."""
+        session, link = identity_link
+        link.stationary.identity_links.remove(link)
+        session.commit()
+
+        assert (
+            session.get(IdentityStationaryLink, (link.stationary_id, link.identity_id))
+            is None
+        )
 
 
 class TestModelIntegration:
@@ -1056,7 +1121,8 @@ class TestModelIntegration:
             # Test bidirectional relationship
             # Note: stat_pt will have auto-generated identities from event listener
             # plus the manually linked one
-            assert len(stat_pt.identities) >= 2
-            assert identity.id in [i.id for i in stat_pt.identities]
-            assert len(identity.stationary_points) == 1
-            assert identity.stationary_points[0].id == stat_pt.id
+            assert len(stat_pt.identity_links) >= 2
+            assert link in stat_pt.identity_links
+            assert identity.stationary_links == [link]
+            assert link.stationary is stat_pt
+            assert link.identity is identity

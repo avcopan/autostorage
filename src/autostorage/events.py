@@ -388,8 +388,8 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
             continue
 
         ident = _get_or_create_identity(ctx, name, value)
-        if ident not in obj.identities:
-            obj.identities.append(ident)
+        if all(link.identity is not ident for link in obj.identity_links):
+            obj.identity_links.append(IdentityStationaryLink(identity=ident))
         keys[name] = (name, value)
         if parent_key is not None:
             pending = ctx.pending_siblings.setdefault((parent_key, name), {})
@@ -429,6 +429,6 @@ def add_registry_identities_before_flush(
 
     ctx = _IdentityFlushContext(session=session)
     for obj in changed:
-        obj.identities.clear()
+        obj.identity_links.clear()
     for obj in new + changed:
         _attach_identities(ctx, obj)

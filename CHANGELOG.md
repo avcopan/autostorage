@@ -6,11 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 ### Added
 - **`rdkit_inchi_conn`**: A built-in identity algorithm of kind `isomer`: the connectivity InChI, without stereo layers, from `autogeom.inchi(geo, stereo=False)`. Stereoisomers share one identity (e.g. cis- and trans-1,2-difluoroethene), which `rdkit_inchi` (kind `stereoisomer`) tells apart. Every new stationary point now gets four identities instead of three.
+- **`IdentityStationaryLink.identity_cache`**: a dict stored as zlib-compressed JSON (`CompressedJSONTypeDecorator`), for data that makes generating identities cheaper (e.g. graph isomorphisms). Setting a top-level key in place is saved. The cache is discarded when the stationary point's geometry changes, since its identities are regenerated.
+- `IdentityStationaryLink.stationary` and `IdentityStationaryLink.identity` relationships.
 
 ### Changed
 - autostorage requires autogeom 0.0.2 or newer, which added the `stereo` option to `autogeom.inchi`.
 - **Breaking:** `IdentityAlgorithmRow` is keyed by its `name`, like `PropertyKindRow`, instead of an integer `id`. `IdentityAlgorithmRow.parent_algorithm_id` is now `parent_algorithm_name`, and `IdentityRow.algorithm_id` is now `algorithm_name` (e.g. `IdentityRow(algorithm_name="rdkit_inchi", value=...)`). The schema changed, so databases created by earlier versions must be regenerated.
 - **Breaking:** every row's `id`, and every foreign key to one, is a `uuid.UUID` assigned when the row is created, as `GeometryRow` and `PropertyValueRow` already were. Ids no longer follow creation order. Databases created by earlier versions must be regenerated.
+- **Breaking:** `StationaryPointRow.identities` and `IdentityRow.stationary_points` are replaced by the link rows `StationaryPointRow.identity_links` and `IdentityRow.stationary_links`, which give access to each link's `identity_cache`. Use `[link.identity for link in stp.identity_links]` for the identities; to attach one, append `IdentityStationaryLink(identity=...)`. Removing a link from either list deletes it. The new column changes the schema, so databases created by earlier versions must be regenerated.
 
 ## [0.0.21] - 2026-11-10
 ### Changed
