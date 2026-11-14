@@ -1218,6 +1218,51 @@ class TestIdentitiesOnGeometryChange:
             assert all(link.identity_cache is None for link in stp.identity_links)
 
 
+class TestMinimaOnlyIdentities:
+    """Algorithms marked `minima_only` skip saddle points."""
+
+    def test_transition_state_skips_inchi(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A first-order saddle point gets only its formula identity."""
+        with database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation(), order=1
+            )
+            session.add(stp)
+            session.commit()
+
+            names = {i.algorithm.name for i in _identities(stp)}
+            assert names == {"hill_formula"}
+
+    def test_order_change_regenerates_identities(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """Changing `order` adds or removes the `minima_only` identities."""
+        with database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+            assert "rdkit_inchi" in {i.algorithm.name for i in _identities(stp)}
+
+            stp.order = 1
+            session.commit()
+            names = {i.algorithm.name for i in _identities(stp)}
+            assert names == {"hill_formula"}
+
+            stp.order = 0
+            session.commit()
+            assert len(_identities(stp)) == EXPECTED_IDENTITY_COUNT
+
+
 class TestPendingSiblingIdentities:
     """Stationary points added in the same flush share their identities."""
 

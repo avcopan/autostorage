@@ -366,7 +366,8 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
     Algorithms with a parent (e.g. SMILES, with InChI as parent) are passed
     `other_geos`: one geometry per existing identity value among stationary
     points sharing the parent identity. If an algorithm fails, a warning is
-    issued and its identity is skipped.
+    issued and its identity is skipped. Algorithms marked `minima_only` are
+    skipped for saddle points (nonzero `order`).
     """
     geo_row = _resolve_geometry(ctx.session, obj)
     if geo_row is None:
@@ -375,6 +376,8 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
 
     keys: dict[str, _IdentityKey] = {}
     for algorithm in ctx.algorithms:
+        if algorithm.minima_only and obj.order != 0:
+            continue
         name = algorithm.name
         parent = algorithm.parent
         parent_key = keys.get(parent.name) if parent is not None else None
@@ -396,13 +399,14 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
             pending.setdefault(value, geo_row)
 
 
-def _geometry_changed(obj: StationaryPointRow) -> bool:
-    """Return whether the geometry of a persisted stationary point was changed."""
+def _identity_inputs_changed(obj: StationaryPointRow) -> bool:
+    """Return whether the geometry or order of a persisted stationary point changed."""
     state = inspect(obj)
     if state is None:
         return False
     return any(
-        state.attrs[name].history.has_changes() for name in ("geometry", "geometry_id")
+        state.attrs[name].history.has_changes()
+        for name in ("geometry", "geometry_id", "order")
     )
 
 
@@ -416,13 +420,13 @@ def add_registry_identities_before_flush(
 
     Generates and attaches an `IdentityRow` for every registered algorithm (e.g.
     InChI, SMILES, Hill formula). Identities of persisted stationary points are
-    regenerated if their geometry is reassigned.
+    regenerated if their geometry or order changes.
     """
     new = [obj for obj in session.new if isinstance(obj, StationaryPointRow)]
     changed = [
         obj
         for obj in session.dirty
-        if isinstance(obj, StationaryPointRow) and _geometry_changed(obj)
+        if isinstance(obj, StationaryPointRow) and _identity_inputs_changed(obj)
     ]
     if not new and not changed:
         return

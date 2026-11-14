@@ -20,7 +20,8 @@ autostorage registers the following algorithms itself:
 | `rdkit_smiles` | `stereoisomer` | `rdkit_inchi` | SMILES, from `autogeom.smiles` |
 | `hill_formula` | `formula` | `rdkit_inchi` | Formula in Hill order, from `autogeom.formula` |
 
-When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry is replaced.
+When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry or `order` changes.
+Algorithms registered with `minima_only=True`, including both InChI algorithms and `rdkit_smiles`, are skipped for saddle points (`order != 0`, such as transition states), so of the built-in algorithms only `hill_formula` is applied to them.
 Stationary points with the same value share one `IdentityRow`.
 Stereoisomers such as cis- and trans-1,2-difluoroethene therefore share one `rdkit_inchi_conn` identity but have different `rdkit_inchi` identities.
 If an algorithm fails for a geometry (for example, InChI for a metal complex), an `IdentityGenerationWarning` is issued and that identity is skipped.

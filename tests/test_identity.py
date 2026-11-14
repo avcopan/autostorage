@@ -122,6 +122,9 @@ class TestIdentityAlgorithmRegistry:
 
     def test_builtin_algorithms(self) -> None:
         """The built-in algorithms have the expected kinds and parents."""
+        assert rdkit_inchi_conn.minima_only
+        assert rdkit_inchi.minima_only
+        assert rdkit_smiles.minima_only
         assert rdkit_inchi_conn.kind is IdentityKind.ISOMER
         assert rdkit_inchi_conn.parent is None
         assert rdkit_inchi.kind is IdentityKind.STEREOISOMER

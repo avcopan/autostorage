@@ -42,6 +42,8 @@ class IdentityAlgorithm(BaseModel):
         identity_fn: ``(geo, other_geos=None) -> str``, generating the identity.
         parent: Algorithm whose identity selects the `other_geos` passed to
             `identity_fn`, if any.
+        minima_only: Whether to skip stationary points with a nonzero `order`
+            (transition states and higher-order saddle points).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
@@ -50,6 +52,7 @@ class IdentityAlgorithm(BaseModel):
     kind: IdentityKind
     identity_fn: IdentityProtocol
     parent: "IdentityAlgorithm | None" = None
+    minima_only: bool = False
 
 
 class IdentityAlgorithmRegistry:
@@ -64,6 +67,8 @@ class IdentityAlgorithmRegistry:
         kind: IdentityKind,
         identity_fn: IdentityProtocol,
         parent: IdentityAlgorithm | None = None,
+        *,
+        minima_only: bool = False,
     ) -> IdentityAlgorithm:
         """Create and register an identity algorithm.
 
@@ -77,6 +82,8 @@ class IdentityAlgorithmRegistry:
             parent: Algorithm whose identity selects `other_geos`. If given,
                 `identity_fn` receives one geometry per existing identity value
                 among the stationary points that share the parent identity.
+            minima_only: Whether to skip stationary points with a nonzero `order`
+                (e.g. transition states).
 
         Raises:
             ValueError: If an algorithm named `name` is already registered.
@@ -85,7 +92,11 @@ class IdentityAlgorithmRegistry:
             msg = f"Identity algorithm {name!r} is already registered."
             raise ValueError(msg)
         algorithm = IdentityAlgorithm(
-            name=name, kind=kind, identity_fn=identity_fn, parent=parent
+            name=name,
+            kind=kind,
+            identity_fn=identity_fn,
+            parent=parent,
+            minima_only=minima_only,
         )
         cls.algorithms.append(algorithm)
         return algorithm
@@ -117,8 +128,9 @@ rdkit_inchi_conn = IdentityAlgorithmRegistry.register(
     name="rdkit_inchi_conn",
     kind=IdentityKind.ISOMER,
     identity_fn=rdkit_inchi_conn_identity_fn,
+    minima_only=True,
 )
-"""Connectivity InChI from RDKit (kind: isomer)."""
+"""Connectivity InChI from RDKit (kind: isomer; minima only)."""
 
 
 def rdkit_inchi_identity_fn(
@@ -133,8 +145,9 @@ rdkit_inchi = IdentityAlgorithmRegistry.register(
     name="rdkit_inchi",
     kind=IdentityKind.STEREOISOMER,
     identity_fn=rdkit_inchi_identity_fn,
+    minima_only=True,
 )
-"""Standard InChI from RDKit (kind: stereoisomer)."""
+"""Standard InChI from RDKit (kind: stereoisomer; minima only)."""
 
 
 def rdkit_smiles_identity_fn(geo: Geometry, other_geos: OtherGeometries = None) -> str:
@@ -157,8 +170,9 @@ rdkit_smiles = IdentityAlgorithmRegistry.register(
     kind=IdentityKind.STEREOISOMER,
     identity_fn=rdkit_smiles_identity_fn,
     parent=rdkit_inchi,
+    minima_only=True,
 )
-"""SMILES from RDKit (kind: stereoisomer; parent: `rdkit_inchi`).
+"""SMILES from RDKit (kind: stereoisomer; parent: `rdkit_inchi`; minima only).
 
 The SMILES of an existing stationary point with the same InChI is reused.
 """
