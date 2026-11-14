@@ -189,7 +189,7 @@ class TestDatabaseIntegration:
 
             # Create an identity row
             identity = IdentityRow(
-                algorithm_id=algorithm.id,
+                algorithm_name=algorithm.name,
                 value="InChI=1S/CH4/h1H4",
             )
             session.add(identity)
@@ -265,12 +265,12 @@ class TestRegistryTablesPrePopulated:
                         col(IdentityAlgorithmRow.name) == alg.name
                     )
                 ).one()
-                assert alg_row.id
                 if alg.parent is not None:
-                    parent = sess.get(IdentityAlgorithmRow, alg_row.parent_algorithm_id)
+                    parent = sess.get(
+                        IdentityAlgorithmRow, alg_row.parent_algorithm_name
+                    )
                     assert parent is not None
                     assert parent.name == alg.parent.name
-                    assert parent.id
 
     def test_property_kinds_populated(self, database: Database) -> None:
         """`property_kind` table populated from registry at initialization."""

@@ -63,24 +63,14 @@ def _ordered_algorithms() -> Iterator[IdentityAlgorithm]:
 
 def create_identity_algorithms(session: Session) -> None:
     """Create or update a row for every registered identity algorithm."""
-    rows = {row.name: row for row in session.exec(select(IdentityAlgorithmRow))}
     for alg in _ordered_algorithms():
-        parent_id = None
-        if alg.parent is not None:
-            parent_id = rows[alg.parent.name].id
-
-        row = rows.get(alg.name)
+        parent_name = alg.parent.name if alg.parent is not None else None
+        row = session.get(IdentityAlgorithmRow, alg.name)
         if row is None:
-            row = IdentityAlgorithmRow(
-                name=alg.name, kind=alg.kind, parent_algorithm_id=parent_id
-            )
+            row = IdentityAlgorithmRow(name=alg.name, kind=alg.kind)
             session.add(row)
-        else:
-            row.kind = alg.kind
-            row.parent_algorithm_id = parent_id
-        # Flush so the primary key is available to child algorithms
-        session.flush()
-        rows[alg.name] = row
+        row.kind = alg.kind
+        row.parent_algorithm_name = parent_name
     session.commit()
 
 
@@ -264,8 +254,8 @@ def _resolve_trajectory(
     return None
 
 
-type _IdentityKey = tuple[int, str]
-"""An identity's `(algorithm_id, value)`, unique among `IdentityRow`s."""
+type _IdentityKey = tuple[str, str]
+"""An identity's `(algorithm_name, value)`, unique among `IdentityRow`s."""
 
 
 @dataclass
@@ -274,39 +264,38 @@ class _IdentityFlushContext:
 
     Autoflush is suppressed while "before_flush" handlers run, so identities
     created earlier in the same flush are not visible to queries. They are
-    cached here, keyed by algorithm id and value, so that repeated lookups reuse
-    the pending row instead of creating a duplicate that would collide with the
-    `(algorithm_id, value)` unique constraint.
+    cached here, keyed by algorithm name and value, so that repeated lookups
+    reuse the pending row instead of creating a duplicate that would collide with
+    the `(algorithm_name, value)` unique constraint.
     """
 
     session: Session
-    algorithm_ids: dict[str, int]
     algorithms: list[IdentityAlgorithm] = field(
         default_factory=lambda: list(_ordered_algorithms())
     )
     cache: dict[_IdentityKey, IdentityRow] = field(default_factory=dict)
     # Geometries of stationary points added in this flush, keyed by
-    # (parent identity key, algorithm id) and then by their identity value
-    pending_siblings: dict[tuple[_IdentityKey, int], dict[str, GeometryRow]] = field(
+    # (parent identity key, algorithm name) and then by their identity value
+    pending_siblings: dict[tuple[_IdentityKey, str], dict[str, GeometryRow]] = field(
         default_factory=dict
     )
 
 
 def _get_or_create_identity(
-    ctx: _IdentityFlushContext, algorithm_id: int, value: str
+    ctx: _IdentityFlushContext, algorithm_name: str, value: str
 ) -> IdentityRow:
     """Look up a pending or persisted identity, creating one if none exists."""
-    key = (algorithm_id, value)
+    key = (algorithm_name, value)
     ident = ctx.cache.get(key)
     if ident is None:
         ident = ctx.session.exec(
             select(IdentityRow).where(
-                col(IdentityRow.algorithm_id) == algorithm_id,
+                col(IdentityRow.algorithm_name) == algorithm_name,
                 col(IdentityRow.value) == value,
             )
         ).one_or_none()
     if ident is None:
-        ident = IdentityRow(algorithm_id=algorithm_id, value=value)
+        ident = IdentityRow(algorithm_name=algorithm_name, value=value)
         ctx.session.add(ident)
     ctx.cache[key] = ident
     return ident
@@ -315,16 +304,16 @@ def _get_or_create_identity(
 def _sibling_geometries(
     ctx: _IdentityFlushContext,
     obj: StationaryPointRow,
-    algorithm_id: int,
+    algorithm_name: str,
     parent_key: _IdentityKey,
 ) -> dict[str, GeometryRow]:
-    """Return sibling geometries keyed by their `algorithm_id` identity value.
+    """Return sibling geometries keyed by their `algorithm_name` identity value.
 
     Siblings are other stationary points sharing the parent identity
     `parent_key`, including ones added earlier in the same flush. One geometry
     is returned per identity value.
     """
-    siblings = dict(ctx.pending_siblings.get((parent_key, algorithm_id), {}))
+    siblings = dict(ctx.pending_siblings.get((parent_key, algorithm_name), {}))
     parent_ident = ctx.cache[parent_key]
     if parent_ident.id is None:
         return siblings
@@ -342,7 +331,7 @@ def _sibling_geometries(
         )
         .join(GeometryRow, col(GeometryRow.id) == col(StationaryPointRow.geometry_id))
         .where(
-            col(ident.algorithm_id) == algorithm_id,
+            col(ident.algorithm_name) == algorithm_name,
             col(parent_link.identity_id) == parent_ident.id,
             col(StationaryPointRow.id) != obj.id,
         )
@@ -386,24 +375,24 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
 
     keys: dict[str, _IdentityKey] = {}
     for algorithm in ctx.algorithms:
-        alg_id = ctx.algorithm_ids[algorithm.name]
+        name = algorithm.name
         parent = algorithm.parent
         parent_key = keys.get(parent.name) if parent is not None else None
 
         other_geos = None
         if parent_key is not None:
-            other_geos = _sibling_geometries(ctx, obj, alg_id, parent_key)
+            other_geos = _sibling_geometries(ctx, obj, name, parent_key)
 
         value = _generate_identity(algorithm, geo_row, other_geos)
         if value is None:
             continue
 
-        ident = _get_or_create_identity(ctx, alg_id, value)
+        ident = _get_or_create_identity(ctx, name, value)
         if ident not in obj.identities:
             obj.identities.append(ident)
-        keys[algorithm.name] = (alg_id, value)
+        keys[name] = (name, value)
         if parent_key is not None:
-            pending = ctx.pending_siblings.setdefault((parent_key, alg_id), {})
+            pending = ctx.pending_siblings.setdefault((parent_key, name), {})
             pending.setdefault(value, geo_row)
 
 
@@ -438,12 +427,7 @@ def add_registry_identities_before_flush(
     if not new and not changed:
         return
 
-    algorithm_ids = {
-        row.name: row.id
-        for row in session.exec(select(IdentityAlgorithmRow))
-        if row.id is not None
-    }
-    ctx = _IdentityFlushContext(session=session, algorithm_ids=algorithm_ids)
+    ctx = _IdentityFlushContext(session=session)
     for obj in changed:
         obj.identities.clear()
     for obj in new + changed:

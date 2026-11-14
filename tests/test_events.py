@@ -1261,7 +1261,7 @@ class TestPersistedSiblingIdentities:
             smiles = _identity_for_algorithm(stp1, "rdkit_smiles")
             stp1.identities.remove(smiles)
             stp1.identities.append(
-                IdentityRow(algorithm_id=smiles.algorithm_id, value="[H]O[H]")
+                IdentityRow(algorithm_name=smiles.algorithm_name, value="[H]O[H]")
             )
             session.commit()
 

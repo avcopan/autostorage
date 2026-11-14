@@ -595,26 +595,25 @@ class IdentityAlgorithmRow(SQLModel, table=True):
     """A chemical identifier algorithm, mirroring an `IdentityAlgorithm`.
 
     Attributes:
-        id: Primary key.
-        name: Unique algorithm name (e.g. ``rdkit inchi``).
+        name: Primary key; the registered algorithm name (e.g. ``rdkit_inchi``).
         kind: Category of identifier produced (e.g. ``stereoisomer``, ``formula``).
-        parent_algorithm_id: Foreign key to the parent algorithm, whose identity
+        parent_algorithm_name: Foreign key to the parent algorithm, whose identity
             disambiguates this one's `other_geos`, if any.
     """
 
     __tablename__ = "identity_algorithm"
     model_config = SQLModelConfig(arbitrary_types_allowed=True)
 
-    id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(unique=True)
+    name: str = Field(primary_key=True)
     kind: IdentityKind
-    parent_algorithm_id: int | None = _fk_field(
-        "identity_algorithm.id", nullable=True, index=False
+    parent_algorithm_name: str | None = _fk_field(
+        "identity_algorithm.name", nullable=True, index=False
     )
 
     parent_algorithm: "IdentityAlgorithmRow" = Relationship(
         sa_relationship_kwargs={
-            "foreign_keys": "[IdentityAlgorithmRow.parent_algorithm_id]"
+            "foreign_keys": "[IdentityAlgorithmRow.parent_algorithm_name]",
+            "remote_side": "[IdentityAlgorithmRow.name]",
         }
     )
     identities: list["IdentityRow"] = Relationship(back_populates="algorithm")
@@ -625,7 +624,7 @@ class IdentityRow(SQLModel, table=True):
 
     Attributes:
         id: Primary key.
-        algorithm_id: Foreign key to the generating `IdentityAlgorithmRow`.
+        algorithm_name: Foreign key to the generating `IdentityAlgorithmRow`.
         algorithm: Method used to generate the identifier (e.g. ``rdkit inchi``, ``rdkit
             smiles``); its ``kind`` gives the category (e.g. ``stereoisomer``,
             ``formula``).
@@ -635,11 +634,11 @@ class IdentityRow(SQLModel, table=True):
 
     __tablename__ = "identity"
     __table_args__ = (
-        UniqueConstraint("algorithm_id", "value", name="unique_identity"),
+        UniqueConstraint("algorithm_name", "value", name="unique_identity"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
-    algorithm_id: int | None = _fk_field("identity_algorithm.id")
+    algorithm_name: str | None = _fk_field("identity_algorithm.name")
     value: str
 
     algorithm: "IdentityAlgorithmRow" = Relationship(back_populates="identities")

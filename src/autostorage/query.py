@@ -43,13 +43,9 @@ def stationary_point_by_identity(
             target=IdentityRow,
             onclause=col(IdentityRow.id) == col(IdentityStationaryLink.identity_id),
         )
-        .join(
-            target=IdentityAlgorithmRow,
-            onclause=col(IdentityAlgorithmRow.id) == col(IdentityRow.algorithm_id),
-        )
         .where(
             col(IdentityRow.value) == value,
-            col(IdentityAlgorithmRow.name) == name,
+            col(IdentityRow.algorithm_name) == name,
         )
     )
     if not include_pseudo:

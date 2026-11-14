@@ -727,7 +727,7 @@ class TestIdentityRow:
                 )
             ).one()
             identity = IdentityRow(
-                algorithm_id=algorithm.id,
+                algorithm_name=algorithm.name,
                 value="InChI=1S/CH4/h1H4",
             )
             session.add(identity)
@@ -747,7 +747,7 @@ class TestIdentityRow:
                 )
             ).one()
             identity1 = IdentityRow(
-                algorithm_id=algorithm.id,
+                algorithm_name=algorithm.name,
                 value="InChI=1S/CH4/h1H4",
             )
             session.add(identity1)
@@ -755,7 +755,7 @@ class TestIdentityRow:
 
             # Try to create duplicate identity
             identity2 = IdentityRow(
-                algorithm_id=algorithm.id,
+                algorithm_name=algorithm.name,
                 value="InChI=1S/CH4/h1H4",
             )
             session.add(identity2)
@@ -771,7 +771,9 @@ class TestIdentityRow:
                     col(IdentityAlgorithmRow.name) == "rdkit_inchi"
                 )
             ).one()
-            identity = IdentityRow(algorithm_id=algorithm.id, value="InChI=1S/CH4/h1H4")
+            identity = IdentityRow(
+                algorithm_name=algorithm.name, value="InChI=1S/CH4/h1H4"
+            )
             session.add(identity)
             session.commit()
 
@@ -931,7 +933,7 @@ class TestLinkModels:
                     col(IdentityAlgorithmRow.name) == "rdkit_smiles"
                 )
             ).one()
-            identity = IdentityRow(algorithm_id=smiles_algorithm.id, value="C")
+            identity = IdentityRow(algorithm_name=smiles_algorithm.name, value="C")
             session.add(identity)
             session.flush()
 
@@ -1036,7 +1038,7 @@ class TestModelIntegration:
                     col(IdentityAlgorithmRow.name) == "rdkit_smiles"
                 )
             ).one()
-            identity = IdentityRow(algorithm_id=smiles_algorithm.id, value="C")
+            identity = IdentityRow(algorithm_name=smiles_algorithm.name, value="C")
             session.add(identity)
             session.flush()
 

@@ -20,7 +20,7 @@ The layers are strict and enforced by import-linter. A module may import from lo
   - Existential data rows: `GeometryRow` (UUID primary key; `relabel_atoms` returns a new, unsaved row), `TrajectoryRow`, `ModelRow`, `CalculationRow`, `PropertyKindRow` (primary key `name`), `PropertyValueRow`, and `ValidationRow`.
   - Stationary point rows: `StationaryPointRow`.
   - Reaction network rows: `StageRow` and `StepRow` (`stage_id1 < stage_id2`, nullable `stage_id_ts` with a null-safe unique index).
-  - Identity rows: `IdentityAlgorithmRow` (unique `name`, `kind`, `parent_algorithm_id`) and `IdentityRow` (unique `(algorithm_id, value)`).
+  - Identity rows: `IdentityAlgorithmRow` (`name` primary key, `kind`, `parent_algorithm_name`) and `IdentityRow` (unique `(algorithm_name, value)`).
 - **`types.py`**: the lowest layer. `Role` (`StrEnum`: `input`/`output`), `CompressedArrayTypeDecorator(dtype=...)` (zlib-compressed `.npy`; `dtype=None` keeps the input dtype), and the decompression cap `MAX_DECOMPRESSED_BYTES`.
 
 ### Architectural rules
