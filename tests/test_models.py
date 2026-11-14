@@ -8,8 +8,8 @@ from collections.abc import Generator
 from pathlib import Path
 
 import numpy as np
-import pint
 import pytest
+from autogeom import ureg
 from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select, text
@@ -160,14 +160,44 @@ class TestGeometryRow:
                 symbols=symbols, coordinates=np.zeros((len(symbols), 3)), spin=spin
             )
 
-    def test_pint_coordinates_converted(self) -> None:
-        """`pint` coordinates are converted to Angstrom."""
-        ureg = pint.UnitRegistry()
-        geo = GeometryRow(
-            symbols=["H", "H"],
-            coordinates=np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]) * ureg.bohr,
-        )
+    @pytest.mark.parametrize(
+        ("coordinates", "z"),
+        [
+            ([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]], 1.0),
+            (
+                ureg.Quantity(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 1.0]]), "bohr"),
+                0.529177,
+            ),
+            (ureg.Quantity(np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.1]]), "nm"), 1.0),
+        ],
+    )
+    def test_coordinates_stored_in_angstrom(
+        self, database: Database, coordinates: object, z: float
+    ) -> None:
+        """`pint` coordinates are converted to Angstrom; plain ones are kept as is."""
+        geo = GeometryRow(symbols=["H", "H"], coordinates=coordinates)
+        assert geo.coordinates[1, 2] == pytest.approx(z, rel=1e-5)
+        with database.session() as session:
+            session.add(geo)
+            session.commit()
+            session.expire_all()
+            assert geo.coordinates[1, 2] == pytest.approx(z, rel=1e-5)
+
+    def test_pint_coordinates_converted_on_assignment(self) -> None:
+        """Coordinates assigned as a `pint` quantity are converted to Angstrom."""
+        geo = GeometryRow(symbols=["H", "H"], coordinates=np.zeros((2, 3)))
+        bohr = ureg.Quantity(np.array([[0, 0, 0], [0, 0, 1.0]]), "bohr")
+        # The validator accepts quantities, though the field is typed as the result
+        geo.coordinates = bohr  # ty: ignore[invalid-assignment]
         assert geo.coordinates[1, 2] == pytest.approx(0.529177, rel=1e-5)
+
+    def test_pint_coordinates_incompatible_units(self) -> None:
+        """Coordinates without length units are rejected."""
+        with pytest.raises(ValidationError, match="length units"):
+            GeometryRow(
+                symbols=["H", "H"],
+                coordinates=ureg.Quantity(np.zeros((2, 3)), "hartree"),
+            )
 
     def test_relabel_atoms_creates_new_row(
         self, database: Database, water: GeometryRow
