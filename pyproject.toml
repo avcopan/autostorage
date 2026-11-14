@@ -45,7 +45,7 @@ convention = "google"
 
 # Ty configurations
 [tool.ty.environment]
-python = ".pixi/envs/test/bin/python"
+python = ".pixi/envs/dev/bin/python"
 
 [tool.ty.src]
 include = [

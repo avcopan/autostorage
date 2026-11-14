@@ -1,0 +1,708 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Migrations &#8212; autostorage 0.0.12 documentation</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+
+    <script src="_static/documentation_options.js?v=3bbcec59"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'migrations';</script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Development" href="development.html" />
+    <link rel="prev" title="Events (automatic behavior)" href="events.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+  
+    
+    <script src="_static/searchtools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <script src="searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class="col-lg-3 navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">autostorage 0.0.12 documentation</p>
+  
+</a></div>
+    
+  </div>
+  
+  <div class="col-lg-9 navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quickstart.html">
+    Quickstart
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="data-model.html">
+    Data model
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="database.html">
+    Database
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="queries.html">
+    Query patterns
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="events.html">
+    Events (automatic behavior)
+  </a>
+</li>
+
+            <li class="nav-item dropdown">
+                <button class="btn dropdown-toggle nav-item" type="button"
+                data-bs-toggle="dropdown" aria-expanded="false"
+                aria-controls="pst-nav-more-links">
+                    More
+                </button>
+                <ul id="pst-nav-more-links" class="dropdown-menu">
+                    
+<li class=" current active">
+  <a class="nav-link dropdown-item nav-internal" href="#">
+    Migrations
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="development.html">
+    Development
+  </a>
+</li>
+
+
+<li class=" ">
+  <a class="nav-link dropdown-item nav-internal" href="apidocs/index.html">
+    API Reference
+  </a>
+</li>
+
+                </ul>
+            </li>
+            
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/avcopan/autostorage" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="quickstart.html">
+    Quickstart
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="data-model.html">
+    Data model
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="database.html">
+    Database
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="queries.html">
+    Query patterns
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="events.html">
+    Events (automatic behavior)
+  </a>
+</li>
+
+
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="#">
+    Migrations
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="development.html">
+    Development
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="apidocs/index.html">
+    API Reference
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/avcopan/autostorage" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-square-github fa-lg" aria-hidden="true"></i><span class="visually-hidden">GitHub</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item pst-sidebar-collapse"><button id="pst-collapse-sidebar-button" aria-expanded="true" aria-controls="pst-primary-sidebar">
+  <svg class="pst-icon" role="img" aria-hidden="true" focusable="false" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+    <path fill="currentColor" d="M3 15.5C2.36232 15.5 1.74874 15.2564 1.28478 14.8189C0.820828 14.3815 0.541576 13.7832 0.504167 13.1467L0.5 13L0.5 3C0.499965 2.36232 0.743605 1.74874 1.18107 1.28478C1.61854 0.820828 2.21676 0.541576 2.85333 0.504167L3 0.5L13 0.5C13.6377 0.499965 14.2513 0.743605 14.7152 1.18107C15.1792 1.61854 15.4584 2.21676 15.4958 2.85333L15.5 3L15.5 13C15.5 13.6377 15.2564 14.2513 14.8189 14.7152C14.3815 15.1792 13.7832 15.4584 13.1467 15.4958L13 15.5L3 15.5ZM3 13.8333L10.5 13.8333L10.5 2.16667L3 2.16667C2.79589 2.16669 2.59889 2.24163 2.44636 2.37726C2.29383 2.5129 2.19638 2.69979 2.1725 2.9025L2.16667 3L2.16667 13C2.16669 13.2041 2.24163 13.4011 2.37726 13.5536C2.5129 13.7062 2.69979 13.8036 2.9025 13.8275L3 13.8333ZM6.65583 10.325L6.5775 10.2558L4.91083 8.58917C4.76735 8.44567 4.68116 8.25476 4.66843 8.05223C4.65569 7.84971 4.71729 7.6495 4.84167 7.48917L4.91083 7.41083L6.5775 5.74417C6.72747 5.59471 6.9287 5.50794 7.14032 5.50148C7.35194 5.49502 7.55809 5.56935 7.7169 5.70937C7.8757 5.8494 7.97525 6.04463 7.99533 6.25539C8.01541 6.46616 7.95451 6.67667 7.825 6.84417L7.75583 6.9225L6.67917 8L7.75583 9.0775C7.89931 9.22099 7.98551 9.41191 7.99824 9.61443C8.01097 9.81695 7.94938 10.0172 7.825 10.1775L7.75583 10.2558C7.61234 10.3993 7.42142 10.4855 7.2189 10.4982C7.01638 10.511 6.81617 10.4494 6.65583 10.325Z"/>
+  </svg>
+  <span class="pst-collapse-sidebar-label">Collapse Sidebar</span>
+  <span class="pst-expand-sidebar-label">Expand Sidebar</span>
+</button></div>
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links"
+     aria-label="Section Navigation">
+  <p class="bd-links__title" role="heading" aria-level="1">Section Navigation</p>
+  <div class="bd-toc-item navbar-nav"></div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Migrations</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="migrations">
+<h1>Migrations<a class="headerlink" href="#migrations" title="Link to this heading">#</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">autostorage</span></code> has two independent sources of schema, used in different situations:</p>
+<ul class="simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">SQLModel.metadata.create_all(engine)</span></code></strong> — runs automatically inside
+<code class="xref py py-meth docutils literal notranslate"><span class="pre">Database.__init__</span></code> and builds the full
+current schema from the model definitions in one shot. This is what fresh and in-memory
+databases use, including every <code class="docutils literal notranslate"><span class="pre">Database</span></code> instance created in the test suite. No Alembic
+involvement at all.</p></li>
+<li><p><strong>Alembic migrations</strong> (<code class="docutils literal notranslate"><span class="pre">migrations/</span></code>) — the only path for evolving an <em>existing</em> on-disk
+database in place, so it picks up schema changes without losing the data already in it.</p></li>
+</ul>
+<p>If you’re not migrating an existing database (e.g. writing a test, or working with a
+scratch/in-memory <code class="docutils literal notranslate"><span class="pre">Database</span></code>), you don’t need anything on this page — just change the models
+and <code class="docutils literal notranslate"><span class="pre">create_all</span></code> picks it up.</p>
+<section id="applying-migrations">
+<h2>Applying migrations<a class="headerlink" href="#applying-migrations" title="Link to this heading">#</a></h2>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="nv">AUTOSTORAGE_DATABASE_URL</span><span class="o">=</span>sqlite:///path/to.db<span class="w"> </span>pixi<span class="w"> </span>run<span class="w"> </span>migrate
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">pixi</span> <span class="pre">run</span> <span class="pre">migrate</span></code> runs <code class="docutils literal notranslate"><span class="pre">alembic</span> <span class="pre">upgrade</span> <span class="pre">head</span></code>. <code class="docutils literal notranslate"><span class="pre">migrations/env.py</span></code> reads
+<code class="docutils literal notranslate"><span class="pre">AUTOSTORAGE_DATABASE_URL</span></code> from the environment and uses it to override <code class="docutils literal notranslate"><span class="pre">alembic.ini</span></code>’s
+<code class="docutils literal notranslate"><span class="pre">sqlalchemy.url</span></code> at runtime, so a single Alembic setup can target any on-disk database without
+editing config. If the variable isn’t set, Alembic falls back to whatever’s hardcoded in
+<code class="docutils literal notranslate"><span class="pre">alembic.ini</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">env.py</span></code> also does one thing that’s easy to miss: it imports <code class="docutils literal notranslate"><span class="pre">autostorage.database</span></code> purely for
+its side effect of pulling in <code class="docutils literal notranslate"><span class="pre">autostorage.models</span></code> and <code class="docutils literal notranslate"><span class="pre">autostorage.events</span></code>, which is what
+registers every <code class="docutils literal notranslate"><span class="pre">table=True</span></code> model onto <code class="docutils literal notranslate"><span class="pre">SQLModel.metadata</span></code>. Without that import, Alembic
+would see an empty target schema.</p>
+</section>
+<section id="writing-a-new-migration">
+<h2>Writing a new migration<a class="headerlink" href="#writing-a-new-migration" title="Link to this heading">#</a></h2>
+<p>After changing a <code class="docutils literal notranslate"><span class="pre">table=True</span></code> model’s columns, constraints, or indexes:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pixi<span class="w"> </span>run<span class="w"> </span>-e<span class="w"> </span>dev<span class="w"> </span>alembic<span class="w"> </span>revision<span class="w"> </span>--autogenerate<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;describe the change&quot;</span>
+</pre></div>
+</div>
+<p>Run this against a scratch on-disk SQLite database (not <code class="docutils literal notranslate"><span class="pre">:memory:</span></code> — Alembic needs a real file
+to diff against), then <strong>review the generated script by hand</strong> before committing it. Alembic’s
+autogenerate is a reasonable first draft, not a guarantee — see the caveat below for one gap
+specific to this schema.</p>
+<section id="sqlite-can-t-reflect-expression-based-indexes">
+<h3>SQLite can’t reflect expression-based indexes<a class="headerlink" href="#sqlite-can-t-reflect-expression-based-indexes" title="Link to this heading">#</a></h3>
+<p>Two constraints in <code class="docutils literal notranslate"><span class="pre">models.py</span></code> are implemented as expression-based unique <code class="docutils literal notranslate"><span class="pre">Index</span></code>es rather than
+plain <code class="docutils literal notranslate"><span class="pre">UniqueConstraint</span></code>s, specifically to make them null-safe (SQL treats <code class="docutils literal notranslate"><span class="pre">NULL</span> <span class="pre">!=</span> <span class="pre">NULL</span></code>, so a
+plain <code class="docutils literal notranslate"><span class="pre">UniqueConstraint</span></code> lets multiple “duplicate” rows through whenever one of the constrained
+columns is <code class="docutils literal notranslate"><span class="pre">NULL</span></code>):</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">unique_model_null_safe</span></code> on <code class="docutils literal notranslate"><span class="pre">ModelRow</span></code>, over <code class="docutils literal notranslate"><span class="pre">(program,</span> <span class="pre">coalesce(program_version,</span> <span class="pre">''),</span> <span class="pre">method,</span> <span class="pre">coalesce(basis,</span> <span class="pre">''))</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">unq_step_stages_null_safe</span></code> on <code class="docutils literal notranslate"><span class="pre">StepRow</span></code>, over <code class="docutils literal notranslate"><span class="pre">(stage_id1,</span> <span class="pre">stage_id2,</span> <span class="pre">coalesce(stage_id_ts,</span> <span class="pre">0))</span></code>.</p></li>
+</ul>
+<p>SQLite’s reflection support can’t see expression-based indexes, so <code class="docutils literal notranslate"><span class="pre">alembic</span> <span class="pre">revision</span> <span class="pre">--autogenerate</span></code> silently omits them from the generated script — it isn’t that it gets them
+wrong, it just doesn’t know they exist. If a migration touches <code class="docutils literal notranslate"><span class="pre">model</span></code> or <code class="docutils literal notranslate"><span class="pre">step</span></code>, check whether
+these indexes need to be re-created by hand, following the pattern already used in
+<code class="docutils literal notranslate"><span class="pre">e50de3129c84_add_null_safe_indexes_reverse_lookup_.py</span></code>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">op</span><span class="o">.</span><span class="n">create_index</span><span class="p">(</span>
+    <span class="s2">&quot;unique_model_null_safe&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;model&quot;</span><span class="p">,</span>
+    <span class="p">[</span>
+        <span class="s2">&quot;program&quot;</span><span class="p">,</span>
+        <span class="n">sa</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;coalesce(program_version, &#39;&#39;)&quot;</span><span class="p">),</span>
+        <span class="s2">&quot;method&quot;</span><span class="p">,</span>
+        <span class="n">sa</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="s2">&quot;coalesce(basis, &#39;&#39;)&quot;</span><span class="p">),</span>
+    <span class="p">],</span>
+    <span class="n">unique</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>Both indexes are also defense-in-depth alongside an app-level lookup that’s the actual
+dedup mechanism in practice — <code class="docutils literal notranslate"><span class="pre">ModelRow.find_or_create</span></code> and <code class="docutils literal notranslate"><span class="pre">StepRow.find_or_create</span></code>/<code class="docutils literal notranslate"><span class="pre">.query</span></code>
+(see <a class="reference internal" href="data-model.html"><span class="std std-doc">Data model</span></a>) — so a missed index mainly risks a duplicate row slipping in
+under a race, not a functional bug in normal single-writer use.</p>
+</section>
+</section>
+<section id="migration-history">
+<h2>Migration history<a class="headerlink" href="#migration-history" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>Revision</p></th>
+<th class="head"><p>Down revision</p></th>
+<th class="head"><p>Summary</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">faa9f50bc029</span></code></p></td>
+<td><p>(base)</p></td>
+<td><p>Baseline: the schema as of the first tracked migration.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">e50de3129c84</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">faa9f50bc029</span></code></p></td>
+<td><p>Adds <code class="docutils literal notranslate"><span class="pre">created_at</span></code>/<code class="docutils literal notranslate"><span class="pre">updated_at</span></code> timestamps across tables, <code class="docutils literal notranslate"><span class="pre">CalculationRow.status</span></code>/
+<code class="docutils literal notranslate"><span class="pre">error_message</span></code>, reverse-lookup indexes on several link tables, and the two null-safe
+expression indexes described above.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">4230f63e365f</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">e50de3129c84</span></code></p></td>
+<td><p>Adds <code class="docutils literal notranslate"><span class="pre">GeometryRow.geometry_hash</span></code>, backfilled from existing rows, plus the
+<code class="docutils literal notranslate"><span class="pre">unique_geometry_hash</span></code> constraint it backs.</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">0c5bbb0a0d4c</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">4230f63e365f</span></code></p></td>
+<td><p>Adds <code class="docutils literal notranslate"><span class="pre">TrajectoryRow.index_type</span></code>.</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">a9f39d9162ee</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0c5bbb0a0d4c</span></code></p></td>
+<td><p>Adds <code class="docutils literal notranslate"><span class="pre">unique_calculation</span></code> on <code class="docutils literal notranslate"><span class="pre">CalculationRow</span></code> and <code class="docutils literal notranslate"><span class="pre">unique_stationary_point</span></code> on
+<code class="docutils literal notranslate"><span class="pre">StationaryPointRow</span></code>, plus <code class="docutils literal notranslate"><span class="pre">StageRow.members_hash</span></code> (backfilled from existing
+<code class="docutils literal notranslate"><span class="pre">stationary_stage_link</span></code> membership) and the <code class="docutils literal notranslate"><span class="pre">unique_stage_members</span></code> constraint it backs.</p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="keeping-migrations-and-models-in-sync">
+<h2>Keeping migrations and models in sync<a class="headerlink" href="#keeping-migrations-and-models-in-sync" title="Link to this heading">#</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">tests/test_migrations.py</span></code> guards against migrations drifting from the current model
+definitions: it applies every migration to a scratch database with <code class="docutils literal notranslate"><span class="pre">alembic</span> <span class="pre">upgrade</span> <span class="pre">head</span></code>, then
+uses <code class="docutils literal notranslate"><span class="pre">alembic.autogenerate.compare_metadata</span></code> to diff the result against <code class="docutils literal notranslate"><span class="pre">SQLModel.metadata</span></code> and
+asserts there’s no difference. If you change a model without writing (or correctly writing) the
+matching migration, this test fails — treat it as the source of truth for whether a migration
+is complete, not just <code class="docutils literal notranslate"><span class="pre">alembic</span> <span class="pre">revision</span> <span class="pre">--autogenerate</span></code> running without error.</p>
+</section>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="events.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Events (automatic behavior)</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="development.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Development</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#applying-migrations">Applying migrations</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#writing-a-new-migration">Writing a new migration</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#sqlite-can-t-reflect-expression-based-indexes">SQLite can’t reflect expression-based indexes</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#migration-history">Migration history</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#keeping-migrations-and-models-in-sync">Keeping migrations and models in sync</a></li>
+</ul>
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="_sources/migrations.md.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2026 Andreas V. Copan.
+      <br/>
+    
+  </p>
+</div>
+      
+        <div class="footer-item">
+
+  <p class="sphinx-version">
+    Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 9.1.0.
+    <br/>
+  </p>
+</div>
+      
+    </div>
+  
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  <!-- # L10n: Setting the PST URL as an argument as this does not need to be localized -->
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.20.0.
+</p></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>
