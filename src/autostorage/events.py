@@ -9,7 +9,6 @@ import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-import numpy as np
 from autogeom import GeometryConversionError
 from sqlalchemy import event, inspect
 from sqlalchemy.engine import Connection
@@ -75,10 +74,22 @@ def create_identity_algorithms(session: Session) -> None:
 
 
 def create_property_kinds(session: Session) -> None:
-    """Create a row for every registered property kind that is missing one."""
+    """Create a row for every registered property kind that is missing one.
+
+    Raises:
+        ValueError: If a stored kind's units differ from the registered ones, since
+            its stored values would then be misread.
+    """
     for prop_kind in PropertyKindRegistry.property_kinds:
-        if session.get(PropertyKindRow, prop_kind.name) is None:
-            session.add(PropertyKindRow(name=prop_kind.name))
+        row = session.get(PropertyKindRow, prop_kind.name)
+        if row is None:
+            session.add(PropertyKindRow(name=prop_kind.name, units=prop_kind.units))
+        elif row.units != prop_kind.units:
+            msg = (
+                f"Property kind {prop_kind.name!r} is stored in {row.units!r}, but "
+                f"registered with units {prop_kind.units!r}."
+            )
+            raise ValueError(msg)
     session.commit()
 
 
@@ -154,7 +165,11 @@ def verify_property_values_before_flush(
     flush_context: UOWTransaction,  # noqa: ARG001
     instances: object,  # noqa: ARG001
 ) -> None:
-    """Validate property values against their kind and cast them to its dtype."""
+    """Convert property values to their kind's native units and dtype, and validate.
+
+    A `pint.Quantity` is converted to the kind's units; other values are assumed
+    to be in those units already.
+    """
     for obj in _pending(session, PropertyValueRow):
         name = _property_kind_name(obj)
         geo_row = _resolve_geometry(session, obj)
@@ -163,17 +178,17 @@ def verify_property_values_before_flush(
             continue
 
         prop_kind = PropertyKindRegistry.get(name)
+        where = (
+            f"Property {name!r} for GeometryRow {geo_row.id} and "
+            f"CalculationRow {obj.calculation_id}"
+        )
         try:
-            value = np.asarray(obj.value, dtype=prop_kind.dtype)
-        except (TypeError, ValueError):
-            # Raised for ragged/inhomogeneous or non-numeric values
-            value = None
-        if value is None or not prop_kind.validation_fn(value, geo_row):
-            msg = (
-                f"Property {name!r} for GeometryRow {geo_row.id} and "
-                f"CalculationRow {obj.calculation_id} does not match the "
-                "expected shape."
-            )
+            value = prop_kind.to_native(obj.value)
+        except ValueError as err:
+            msg = f"{where}: {err}"
+            raise ValueError(msg) from err
+        if not prop_kind.validation_fn(value, geo_row):
+            msg = f"{where} does not match the expected shape."
             raise ValueError(msg)
         obj.value = value
 

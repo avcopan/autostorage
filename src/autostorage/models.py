@@ -418,15 +418,18 @@ class PropertyKindRow(SQLModel, table=True):
     """A kind of property (e.g. ``energy``, ``gradient``, ``hessian``).
 
     Rows mirror the in-memory `autostorage.property.PropertyKindRegistry`, keyed
-    by name. Validation and storage dtype are looked up from the registry by
-    name, so rows loaded from the database behave the same as freshly seeded
-    ones.
+    by name. Validation, unit conversion, and storage dtype are looked up from
+    the registry by name, so rows loaded from the database behave the same as
+    freshly seeded ones. The units are also stored, so the database records what
+    its values mean.
     """
 
     __tablename__ = "property_kind"
 
     name: str = Field(primary_key=True)
     """Primary key; name of the registered property kind."""
+    units: str
+    """Native units (a `pint` unit string) that values of this kind are stored in."""
     property_values: list["PropertyValueRow"] = Relationship(
         back_populates="property_kind"
     )
@@ -456,8 +459,11 @@ class PropertyValueRow(SQLModel, table=True):
     value: Any = Field(sa_column=Column(CompressedArrayTypeDecorator(dtype=None)))
     """Value produced by `geometry` and `calculation`, as a NumPy array.
 
-    Validated and cast to the property kind's dtype on flush (float64, except
-    float32 for Hessians), so it may be assigned as a float, sequence, or array.
+    Stored in the property kind's native units. On flush, a `pint.Quantity` is
+    converted to those units, and other values are assumed to be in them already.
+    The value is then validated and cast to the kind's dtype (float64, except
+    float32 for Hessians), so it may be assigned as a float, sequence, array, or
+    quantity.
     """
 
 

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from autogeom import ureg
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -1039,7 +1040,55 @@ class TestVerifyPropertyValues:
                     value=value,
                 )
             )
-            with pytest.raises(ValueError, match="expected shape"):
+            with pytest.raises(ValueError, match=r"expected shape|numeric array"):
+                session.flush()
+
+    def test_quantity_converted_to_native_units(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """Quantities are stored as magnitudes in the kind's native units."""
+        with database.session() as session:
+            geo, calc = make_geometry_water(), make_calculation()
+            energy = PropertyValueRow(
+                geometry=geo,
+                calculation=calc,
+                property_kind_name="energy",
+                value=ureg.Quantity(-627.5094740631, "kcal/mol"),
+            )
+            gradient = PropertyValueRow(
+                geometry=geo,
+                calculation=calc,
+                property_kind_name="gradient",
+                value=ureg.Quantity(np.ones(9), "hartree / angstrom"),
+            )
+            session.add_all([energy, gradient])
+            session.commit()
+            session.expire_all()
+
+            assert float(energy.value) == pytest.approx(-1.0)
+            bohr_per_angstrom = ureg.Quantity(1, "bohr").m_as("angstrom")
+            np.testing.assert_allclose(gradient.value, bohr_per_angstrom)
+
+    def test_incompatible_units_raise(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """Quantities with units of the wrong dimensionality are rejected."""
+        with database.session() as session:
+            session.add(
+                PropertyValueRow(
+                    geometry=make_geometry_water(),
+                    calculation=make_calculation(),
+                    property_kind_name="energy",
+                    value=ureg.Quantity(1.0, "angstrom"),
+                )
+            )
+            with pytest.raises(ValueError, match="compatible with 'hartree'"):
                 session.flush()
 
     def test_property_kind_loaded_from_database(

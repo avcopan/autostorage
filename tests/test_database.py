@@ -291,6 +291,16 @@ class TestDatabaseReopen:
                 assert len(kinds) == len(PropertyKindRegistry.property_kinds)
                 assert len(algs) == len(IdentityAlgorithmRegistry.algorithms)
 
+    def test_reopen_with_changed_units_raises(self, db_path: Path) -> None:
+        """Reopening a database whose stored units differ from the registry fails."""
+        with Database(db_path) as db, db.session() as sess:
+            row = sess.get(PropertyKindRow, "energy")
+            assert row is not None
+            row.units = "eV"
+            sess.commit()
+        with pytest.raises(ValueError, match="'energy' is stored in 'eV'"):
+            Database(db_path)
+
     def test_context_manager(self, db_path: Path) -> None:
         """`Database` can be used as a context manager."""
         with Database(db_path) as db:
