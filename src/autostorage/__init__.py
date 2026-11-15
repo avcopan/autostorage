@@ -31,6 +31,7 @@ from .models import (
     StationaryPointRow,
     StepRow,
     StepValidationLink,
+    TrajectoryAxisRow,
     TrajectoryRow,
     ValidationRow,
 )
@@ -42,10 +43,11 @@ from .property import (
     gradient_property_kind,
     hessian_property_kind,
 )
-from .types import IdentityKind, Role
+from .types import AxisKind, IdentityKind, Role
 
 __all__ = [
     "AutostorageSession",
+    "AxisKind",
     "CalculationGeometryLink",
     "CalculationRow",
     "CalculationTrajectoryLink",
@@ -72,6 +74,7 @@ __all__ = [
     "StationaryPointRow",
     "StepRow",
     "StepValidationLink",
+    "TrajectoryAxisRow",
     "TrajectoryRow",
     "ValidationRow",
     "energy_property_kind",

@@ -9,7 +9,8 @@ import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from autogeom import GeometryConversionError
+import pint
+from autogeom import GeometryConversionError, ureg
 from sqlalchemy import event, inspect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper, UOWTransaction, aliased
@@ -26,9 +27,11 @@ from .models import (
     PropertyValueRow,
     StationaryPointRow,
     StepRow,
+    TrajectoryAxisRow,
     TrajectoryRow,
 )
 from .property import PropertyKindRegistry, hessian_property_kind
+from .types import AxisKind
 
 
 class AutostorageSession(Session):
@@ -259,7 +262,7 @@ def verify_trajectory_geometry_ndim(
 
 
 def _resolve_trajectory(
-    session: Session, link: GeometryTrajectoryLink
+    session: Session, link: GeometryTrajectoryLink | TrajectoryAxisRow
 ) -> TrajectoryRow | None:
     """Return the trajectory of `link`, via its relationship or foreign key."""
     if link.trajectory is not None:
@@ -267,6 +270,117 @@ def _resolve_trajectory(
     if link.trajectory_id is not None:
         return session.get(TrajectoryRow, link.trajectory_id)
     return None
+
+
+def _check_axis(axis: TrajectoryAxisRow, traj: TrajectoryRow | None) -> None:
+    """Validate `axis` against its kind and trajectory, and default its units.
+
+    Raises:
+        ValueError: If the kind, keys, units, or axis number are invalid.
+    """
+    try:
+        kind = AxisKind(axis.kind)
+    except ValueError as err:
+        msg = f"Unknown axis kind {axis.kind!r}; expected one of {list(AxisKind)}"
+        raise ValueError(msg) from err
+    count = kind.key_count
+    if count is not None and len(axis.keys or []) != count:
+        msg = f"A {kind} axis needs {count} atom keys, got {axis.keys}"
+        raise ValueError(msg)
+    if axis.units is None:
+        axis.units = kind.default_units
+    try:
+        unit = ureg.Unit(axis.units)
+    except (pint.UndefinedUnitError, AttributeError, TypeError, ValueError) as err:
+        msg = f"Invalid units {axis.units!r} for axis {axis.axis}: {err}"
+        raise ValueError(msg) from err
+    if count is not None and not unit.is_compatible_with(kind.default_units):
+        msg = f"Units {axis.units!r} are not valid for a {kind} axis"
+        raise ValueError(msg)
+    if traj is not None and traj.ndim is not None and not 0 <= axis.axis < traj.ndim:
+        msg = f"Axis {axis.axis} is out of range for a trajectory with ndim {traj.ndim}"
+        raise ValueError(msg)
+
+
+def _fill_link_values(
+    session: Session,
+    link: GeometryTrajectoryLink,
+    traj: TrajectoryRow,
+    axes: dict[int, TrajectoryAxisRow],
+) -> None:
+    """Convert the given values of `link`, and measure the missing ones.
+
+    Raises:
+        ValueError: If the values don't match the trajectory's ndim, or a quantity
+            has incompatible units or belongs to a dimension without an axis.
+    """
+    if link.values is None and not axes:
+        return
+    if traj.ndim is None:
+        msg = "Geometry values require an index (trajectory ndim is unset)"
+        raise ValueError(msg)
+    values = [None] * traj.ndim if link.values is None else list(link.values)
+    if len(values) != traj.ndim:
+        msg = (
+            f"Geometry values length {len(values)} does not match "
+            f"trajectory ndim {traj.ndim}"
+        )
+        raise ValueError(msg)
+
+    geo_row = link.geometry
+    if geo_row is None and link.geometry_id is not None:
+        geo_row = session.get(GeometryRow, link.geometry_id)
+    for dim, value in enumerate(values):
+        axis = axes.get(dim)
+        if value is None:
+            if axis is not None and geo_row is not None:
+                values[dim] = axis.measure(geo_row)
+        elif axis is not None:
+            values[dim] = axis.convert(value)
+        elif isinstance(value, pint.Quantity):
+            msg = f"Value {value:~} has units, but axis {dim} has no TrajectoryAxisRow"
+            raise ValueError(msg)
+        else:
+            values[dim] = float(value)
+    link.values = values
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def fill_trajectory_axis_values(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Validate trajectory axes, and fill in the values of their geometries.
+
+    Missing values of measurable axes (distances, angles, dihedrals) are measured
+    from each geometry, and `pint.Quantity` values are converted to the axis's
+    units. Adding an axis to a trajectory fills in the values of its existing
+    geometries. Registered after `verify_trajectory_geometry_ndim`, so that the
+    inferred ndim is available.
+    """
+    # Rows aren't hashable, so they are keyed by `id()`
+    axes_by_traj: dict[int, dict[int, TrajectoryAxisRow]] = {}
+
+    def _axes(traj: TrajectoryRow) -> dict[int, TrajectoryAxisRow]:
+        key = id(traj)
+        if key not in axes_by_traj:
+            axes_by_traj[key] = {axis.axis: axis for axis in traj.axes}
+        return axes_by_traj[key]
+
+    links = {id(link): link for link in _pending(session, GeometryTrajectoryLink)}
+    for axis in _pending(session, TrajectoryAxisRow):
+        traj = _resolve_trajectory(session, axis)
+        _check_axis(axis, traj)
+        if traj is not None:
+            # Include axes linked only by foreign key
+            _axes(traj)[axis.axis] = axis
+            links.update((id(link), link) for link in traj.geometry_links)
+
+    for link in links.values():
+        traj = _resolve_trajectory(session, link)
+        if traj is not None:
+            _fill_link_values(session, link, traj, _axes(traj))
 
 
 type _IdentityKey = tuple[str, str]

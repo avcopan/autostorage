@@ -4,8 +4,11 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Self
 
+import numpy as np
+import numpy.typing as npt
+import pint
 import py3Dmol
-from autogeom import Geometry
+from autogeom import Geometry, angle, dihedral, distance, ureg
 from autogeom.types import CoordinatesField
 from sqlalchemy.ext.mutable import MutableDict
 from sqlmodel import (
@@ -23,6 +26,7 @@ from sqlmodel import (
 from sqlmodel.main import SQLModelConfig
 
 from .types import (
+    AxisKind,
     CompressedArrayTypeDecorator,
     CompressedJSONTypeDecorator,
     IdentityKind,
@@ -101,6 +105,13 @@ class GeometryTrajectoryLink(SQLModel, table=True):
     """Foreign key to the linked `TrajectoryRow`."""
     index: list[int] | None = Field(default=None, sa_column=Column(JSON))
     """Position of `geometry` within the `trajectory`."""
+    values: list[float | None] | None = Field(default=None, sa_column=Column(JSON))
+    """Physical value along each dimension (e.g. a scanned dihedral), aligned with
+    `index` and in the units of the matching `TrajectoryAxisRow`.
+
+    On flush, missing values of measurable axes are measured from `geometry`, and
+    `pint.Quantity` values are converted to the axis's units.
+    """
     geometry: "GeometryRow" = Relationship(back_populates="trajectory_links")
     """The linked `GeometryRow`."""
     trajectory: "TrajectoryRow" = Relationship(back_populates="geometry_links")
@@ -243,6 +254,70 @@ class GeometryRow(SQLModel, Geometry, table=True):
         )
 
 
+class TrajectoryAxisRow(SQLModel, table=True):
+    """Physical coordinate that one dimension of a trajectory runs along.
+
+    Examples:
+        A relaxed scan of the H-O-O-H dihedral of hydrogen peroxide:
+
+        >>> axis = TrajectoryAxisRow(axis=0, kind="dihedral", keys=[0, 1, 2, 3])
+        >>> geo = GeometryRow(
+        ...     symbols=["H", "O", "O", "H"],
+        ...     coordinates=[[0, 0, 1], [0, 0, 0], [0, 1, 0], [1, 1, 0]],
+        ... )
+        >>> axis.measure(geo)
+        90.0
+    """
+
+    __tablename__ = "trajectory_axis"
+
+    trajectory_id: uuid.UUID | None = _link_fk_field("trajectory.id")
+    """Foreign key to the `TrajectoryRow` this axis describes."""
+    axis: int = Field(primary_key=True)
+    """Dimension of the trajectory's geometry `index` that this axis describes."""
+    kind: AxisKind
+    """Kind of coordinate; `OTHER` coordinates are not measured from the geometry."""
+    keys: list[int] | None = Field(default=None, sa_column=Column(JSON))
+    """Indices of the atoms defining the coordinate (2, 3, or 4 for a distance,
+    angle, or dihedral)."""
+    units: str | None = None
+    """Units of the values along this axis (a `pint` unit string); on flush, defaults
+    to Angstrom for distances, degrees for angles, and dimensionless otherwise."""
+    label: str | None = None
+    """Human-readable description (e.g. ``"H-O-O-H torsion"``)."""
+    trajectory: "TrajectoryRow" = Relationship(back_populates="axes")
+    """The described `TrajectoryRow`."""
+
+    def measure(self, geo: Geometry) -> float | None:
+        """Measure this coordinate in `geo`, in `units`, or `None` for `OTHER` axes."""
+        kind = AxisKind(self.kind)
+        keys = list(self.keys or [])
+        if kind is AxisKind.DISTANCE:
+            value = distance(geo, keys)
+        elif kind is AxisKind.ANGLE:
+            value = angle(geo, keys, degrees=True)
+        elif kind is AxisKind.DIHEDRAL:
+            value = dihedral(geo, keys, degrees=True)
+        else:
+            return None
+        return self.convert(ureg.Quantity(value, kind.default_units))
+
+    def convert(self, value: object) -> float:
+        """Return `value` in `units`; a value without units is assumed to be in them.
+
+        Raises:
+            ValueError: If `value` is a `pint.Quantity` with incompatible units.
+        """
+        if not isinstance(value, pint.Quantity):
+            return float(value)  # ty: ignore[invalid-argument-type]
+        units = self.units or AxisKind(self.kind).default_units
+        try:
+            return float(value.m_as(units))
+        except pint.DimensionalityError as err:
+            msg = f"Expected units compatible with {units!r} but got {value.units:~}."
+            raise ValueError(msg) from err
+
+
 class TrajectoryRow(SQLModel, table=True):
     """Ordered sequence of geometries from a calculation trajectory.
 
@@ -250,6 +325,8 @@ class TrajectoryRow(SQLModel, table=True):
         id: Primary key.
         ndim: Length of each linked geometry's `index` (inferred from the first link
             if unset).
+        axes: Physical coordinates (e.g. a scanned dihedral) that the dimensions run
+            along, ordered by `axis`. Dimensions without one are only indexed.
         geometry_links: Raw link rows connecting geometries to this trajectory.
         calculation_links: Raw link rows connecting calculations to this trajectory.
     """
@@ -259,6 +336,11 @@ class TrajectoryRow(SQLModel, table=True):
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     ndim: int | None = Field(default=None, nullable=True)
 
+    axes: list["TrajectoryAxisRow"] = Relationship(
+        back_populates="trajectory",
+        cascade_delete=True,
+        sa_relationship_kwargs={"order_by": "TrajectoryAxisRow.axis"},
+    )
     geometry_links: list["GeometryTrajectoryLink"] = Relationship(
         back_populates="trajectory", cascade_delete=True
     )
@@ -283,6 +365,54 @@ class TrajectoryRow(SQLModel, table=True):
             ValueError: If the trajectory has no indexed geometries, or `axis` or
                 `at` do not fit its number of dimensions.
         """
+        return [link.geometry for link in self._links_along(axis, at)]
+
+    def values_along(
+        self,
+        axis: int = 0,
+        at: Sequence[int] | None = None,
+        units: str | None = None,
+    ) -> npt.NDArray[np.float64]:
+        """Get the physical values of `axis` for the geometries of `geometries_along`.
+
+        Args:
+            axis: Dimension to run along.
+            at: Indices of the other dimensions, as in `geometries_along`.
+            units: Units to convert to. Defaults to the axis's units.
+
+        Returns:
+            The values along `axis`, with NaN where a geometry has none.
+
+        Raises:
+            ValueError: As for `geometries_along`, or if `units` is given for a
+                dimension without a `TrajectoryAxisRow`, or is incompatible with it.
+        """
+        values = np.array(
+            [
+                np.nan
+                if link.values is None or link.values[axis] is None
+                else link.values[axis]
+                for link in self._links_along(axis, at)
+            ],
+            dtype=np.float64,
+        )
+        if units is None:
+            return values
+        axis_row = next((row for row in self.axes if row.axis == axis), None)
+        if axis_row is None:
+            msg = f"Trajectory {self.id} has no TrajectoryAxisRow for axis {axis}"
+            raise ValueError(msg)
+        native = axis_row.units or AxisKind(axis_row.kind).default_units
+        try:
+            return ureg.Quantity(values, native).m_as(units)
+        except pint.DimensionalityError as err:
+            msg = f"Cannot convert axis {axis} values from {native!r} to {units!r}."
+            raise ValueError(msg) from err
+
+    def _links_along(
+        self, axis: int, at: Sequence[int] | None
+    ) -> list[GeometryTrajectoryLink]:
+        """Get the links of `geometries_along`, ordered by their index along `axis`."""
         links = [link for link in self.geometry_links if link.index is not None]
         if not links:
             msg = f"Trajectory {self.id} has no indexed geometries"
@@ -303,11 +433,11 @@ class TrajectoryRow(SQLModel, table=True):
 
         target = list(at)
         matches = [
-            (idx[axis], link.geometry)
+            (idx[axis], link)
             for idx, link in zip(indices, links, strict=True)
             if [idx[dim] for dim in others] == target
         ]
-        return [geo for _, geo in sorted(matches, key=lambda match: match[0])]
+        return [link for _, link in sorted(matches, key=lambda match: match[0])]
 
     def view(
         self,

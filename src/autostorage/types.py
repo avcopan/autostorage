@@ -11,6 +11,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 
 __all__ = [
+    "AxisKind",
     "CompressedArrayTypeDecorator",
     "CompressedJSONTypeDecorator",
     "IdentityKind",
@@ -115,3 +116,25 @@ class IdentityKind(StrEnum):
     ISOMER = "isomer"
     STEREOISOMER = "stereoisomer"
     CONFORMER = "conformer"
+
+
+class AxisKind(StrEnum):
+    """Physical coordinate that a trajectory dimension runs along."""
+
+    DISTANCE = "distance"
+    ANGLE = "angle"
+    DIHEDRAL = "dihedral"
+    OTHER = "other"
+    """Not measurable from the geometry (e.g. an IRC arc length)."""
+
+    @property
+    def key_count(self) -> int | None:
+        """Number of atom keys defining the coordinate, or `None` for `OTHER`."""
+        return {"distance": 2, "angle": 3, "dihedral": 4}.get(self.value)
+
+    @property
+    def default_units(self) -> str:
+        """Units that values are stored in unless the axis says otherwise."""
+        return {"distance": "angstrom", "other": "dimensionless"}.get(
+            self.value, "degree"
+        )

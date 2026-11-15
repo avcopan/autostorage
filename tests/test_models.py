@@ -36,10 +36,11 @@ from autostorage.models import (
     StationaryPointRow,
     StepRow,
     StepValidationLink,
+    TrajectoryAxisRow,
     TrajectoryRow,
     ValidationRow,
 )
-from autostorage.types import Role
+from autostorage.types import AxisKind, Role
 
 
 @pytest.fixture
@@ -338,6 +339,205 @@ class TestTrajectoryRow:
         traj = self._grid_trajectory((2, 2))
         with pytest.raises(ValueError, match="No geometries"):
             traj.view(axis=0, at=[5])
+
+
+def _hooh(phi: float) -> GeometryRow:
+    """HOOH with an H-O-O-H dihedral of `phi` degrees."""
+    th = np.radians(phi)
+    return GeometryRow(
+        symbols=["H", "O", "O", "H"],
+        coordinates=[[0, 0, 1], [0, 0, 0], [0, 1, 0], [np.sin(th), 1, np.cos(th)]],
+    )
+
+
+class TestTrajectoryAxisRow:
+    """Tests for TrajectoryAxisRow and the values of a trajectory's geometries."""
+
+    PHIS = (0.0, 60.0, 120.0, 180.0)
+
+    @classmethod
+    def _scan(cls, **axis_kwargs: object) -> TrajectoryRow:
+        """Build a dihedral scan of HOOH, with an axis describing dimension 0."""
+        traj = TrajectoryRow()
+        traj.axes.append(
+            TrajectoryAxisRow(
+                axis=0,
+                kind=AxisKind.DIHEDRAL,
+                keys=[0, 1, 2, 3],
+                **axis_kwargs,  # ty: ignore[invalid-argument-type]
+            )
+        )
+        for i, phi in reversed(list(enumerate(cls.PHIS))):
+            traj.geometry_links.append(
+                GeometryTrajectoryLink(geometry=_hooh(phi), index=[i])
+            )
+        return traj
+
+    def test_values_measured_on_flush(self, database: Database) -> None:
+        """Missing dihedral values are measured, in degrees by default."""
+        with database.session() as session:
+            traj = self._scan(label="H-O-O-H torsion")
+            session.add(traj)
+            session.commit()
+            session.expire_all()
+
+            assert traj.axes[0].units == "degree"
+            assert traj.axes[0].label == "H-O-O-H torsion"
+            assert traj.values_along() == pytest.approx(self.PHIS)
+            assert traj.values_along(units="radian") == pytest.approx(
+                np.radians(self.PHIS)
+            )
+
+    def test_values_in_axis_units(self, database: Database) -> None:
+        """Measured values are stored in the axis's units."""
+        with database.session() as session:
+            traj = self._scan(units="radian")
+            session.add(traj)
+            session.commit()
+            assert traj.values_along() == pytest.approx(np.radians(self.PHIS))
+
+    @pytest.mark.parametrize(
+        ("kind", "keys", "expected"),
+        [("distance", [1, 2], 1.0), ("angle", [0, 1, 2], 90.0)],
+    )
+    def test_measure(self, kind: str, keys: list[int], expected: float) -> None:
+        """Distances are measured in Angstrom and angles in degrees."""
+        axis = TrajectoryAxisRow(axis=0, kind=AxisKind(kind), keys=keys)
+        assert axis.measure(_hooh(90.0)) == pytest.approx(expected)
+
+    def test_other_axis_is_not_measured(self, database: Database) -> None:
+        """`OTHER` axes keep given values, converted, and leave missing ones None."""
+        with database.session() as session:
+            traj = TrajectoryRow()
+            traj.axes.append(
+                TrajectoryAxisRow(axis=0, kind=AxisKind.OTHER, units="bohr")
+            )
+            given = GeometryTrajectoryLink(
+                geometry=_hooh(0.0),
+                index=[0],
+                values=[ureg.Quantity(0.0529177, "nm")],  # ty: ignore[invalid-argument-type]
+            )
+            missing = GeometryTrajectoryLink(geometry=_hooh(60.0), index=[1])
+            traj.geometry_links.extend([given, missing])
+            session.add(traj)
+            session.commit()
+
+            assert given.values == pytest.approx([1.0], rel=1e-5)
+            assert missing.values == [None]
+            np.testing.assert_allclose(traj.values_along(), [1.0, np.nan], rtol=1e-5)
+
+    def test_given_values_kept_and_converted(self, database: Database) -> None:
+        """Given values are kept, and quantities converted to the axis's units."""
+        with database.session() as session:
+            traj = self._scan()
+            links = sorted(traj.geometry_links, key=lambda link: link.index or [])
+            links[0].values = [1.5]
+            links[1].values = [ureg.Quantity(np.pi / 2, "radian")]  # ty: ignore[invalid-assignment]
+            session.add(traj)
+            session.commit()
+
+            assert traj.values_along() == pytest.approx([1.5, 90.0, 120.0, 180.0])
+
+    def test_axis_added_later_fills_values(self, database: Database) -> None:
+        """Adding an axis to a stored trajectory fills its geometries' values."""
+        with database.session() as session:
+            traj = self._scan()
+            traj.axes.clear()
+            session.add(traj)
+            session.commit()
+            assert all(link.values is None for link in traj.geometry_links)
+
+            session.add(
+                TrajectoryAxisRow(
+                    trajectory_id=traj.id, axis=0, kind="dihedral", keys=[0, 1, 2, 3]
+                )
+            )
+            session.commit()
+            session.expire_all()
+            assert traj.values_along() == pytest.approx(self.PHIS)
+
+    def test_values_without_axes(self, database: Database) -> None:
+        """Plain values are accepted on dimensions without an axis."""
+        with database.session() as session:
+            traj = TrajectoryRow()
+            link = GeometryTrajectoryLink(geometry=_hooh(0), index=[0], values=[2])
+            traj.geometry_links.append(link)
+            session.add(traj)
+            session.commit()
+            assert link.values == [2.0]
+            with pytest.raises(ValueError, match="no TrajectoryAxisRow"):
+                traj.values_along(units="degree")
+
+    @pytest.mark.parametrize(
+        ("axis_kwargs", "values", "match"),
+        [
+            ({"keys": [0, 1, 2]}, None, "needs 4 atom keys"),
+            ({"units": "furlongs_per_banana"}, None, "Invalid units"),
+            ({"units": "angstrom"}, None, "not valid for a dihedral"),
+            ({"axis": 1}, None, "out of range"),
+            ({"kind": "torsion"}, None, "Unknown axis kind"),
+            ({}, [1.0, 2.0], "does not match trajectory ndim"),
+            ({}, [ureg.Quantity(1.0, "hartree")], "Expected units compatible"),
+        ],
+    )
+    def test_invalid(
+        self,
+        database: Database,
+        axis_kwargs: dict[str, object],
+        values: list[object] | None,
+        match: str,
+    ) -> None:
+        """Invalid axes and values are rejected on flush."""
+        traj = TrajectoryRow()
+        traj.axes.append(
+            TrajectoryAxisRow(
+                **{"axis": 0, "kind": "dihedral", "keys": [0, 1, 2, 3], **axis_kwargs}  # ty: ignore[invalid-argument-type]
+            )
+        )
+        traj.geometry_links.append(
+            GeometryTrajectoryLink(geometry=_hooh(0), index=[0], values=values)  # ty: ignore[invalid-argument-type]
+        )
+        with database.session() as session:
+            session.add(traj)
+            with pytest.raises(ValueError, match=match):
+                session.commit()
+
+    @pytest.mark.parametrize(
+        ("values", "match"),
+        [
+            ([ureg.Quantity(1.0, "degree")], "has no TrajectoryAxisRow"),
+            ([1.0], "require an index"),
+        ],
+    )
+    def test_invalid_values_without_axis(
+        self, database: Database, values: list[object], match: str
+    ) -> None:
+        """Quantities need an axis, and values need an index."""
+        traj = TrajectoryRow()
+        index = None if match == "require an index" else [0]
+        traj.geometry_links.append(
+            GeometryTrajectoryLink(geometry=_hooh(0), index=index, values=values)  # ty: ignore[invalid-argument-type]
+        )
+        with database.session() as session:
+            session.add(traj)
+            with pytest.raises(ValueError, match=match):
+                session.commit()
+
+    def test_values_along_incompatible_units(self) -> None:
+        """`values_along` rejects units incompatible with the axis."""
+        traj = self._scan(units="degree")
+        with pytest.raises(ValueError, match="Cannot convert"):
+            traj.values_along(units="bohr")
+
+    def test_axes_deleted_with_trajectory(self, database: Database) -> None:
+        """Deleting a trajectory deletes its axes."""
+        with database.session() as session:
+            traj = self._scan()
+            session.add(traj)
+            session.commit()
+            session.delete(traj)
+            session.commit()
+            assert session.exec(select(TrajectoryAxisRow)).all() == []
 
 
 class TestModelRow:
