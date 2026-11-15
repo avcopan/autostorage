@@ -218,15 +218,17 @@ class GeometryRow(SQLModel, Geometry, table=True):
     charge: int = 0
     spin: int = 0
 
-    properties: list["PropertyValueRow"] = Relationship(back_populates="geometry")
+    properties: list["PropertyValueRow"] = Relationship(
+        back_populates="geometry", cascade_delete=True
+    )
     stationary_points: list["StationaryPointRow"] = Relationship(
-        back_populates="geometry"
+        back_populates="geometry", cascade_delete=True
     )
     trajectory_links: list["GeometryTrajectoryLink"] = Relationship(
-        back_populates="geometry"
+        back_populates="geometry", cascade_delete=True
     )
     calculation_links: list["CalculationGeometryLink"] = Relationship(
-        back_populates="geometry"
+        back_populates="geometry", cascade_delete=True
     )
 
     def relabel_atoms(self, indices: Sequence[int]) -> Self:
@@ -258,10 +260,10 @@ class TrajectoryRow(SQLModel, table=True):
     ndim: int | None = Field(default=None, nullable=True)
 
     geometry_links: list["GeometryTrajectoryLink"] = Relationship(
-        back_populates="trajectory"
+        back_populates="trajectory", cascade_delete=True
     )
     calculation_links: list["CalculationTrajectoryLink"] = Relationship(
-        back_populates="trajectory"
+        back_populates="trajectory", cascade_delete=True
     )
 
     def geometries_along(
@@ -367,7 +369,9 @@ class ModelRow(SQLModel, table=True):
         default_factory=dict, sa_column=_json_dict_column()
     )
 
-    calculations: list["CalculationRow"] = Relationship(back_populates="model")
+    calculations: list["CalculationRow"] = Relationship(
+        back_populates="model", cascade_delete=True
+    )
 
 
 class CalculationRow(SQLModel, table=True):
@@ -401,16 +405,20 @@ class CalculationRow(SQLModel, table=True):
     )
 
     model: "ModelRow" = Relationship(back_populates="calculations")
-    properties: list["PropertyValueRow"] = Relationship(back_populates="calculation")
-    validations: list["ValidationRow"] = Relationship(back_populates="calculation")
+    properties: list["PropertyValueRow"] = Relationship(
+        back_populates="calculation", cascade_delete=True
+    )
+    validations: list["ValidationRow"] = Relationship(
+        back_populates="calculation", cascade_delete=True
+    )
     stationary_points: list["StationaryPointRow"] = Relationship(
-        back_populates="calculation"
+        back_populates="calculation", cascade_delete=True
     )
     geometry_links: list["CalculationGeometryLink"] = Relationship(
-        back_populates="calculation"
+        back_populates="calculation", cascade_delete=True
     )
     trajectory_links: list["CalculationTrajectoryLink"] = Relationship(
-        back_populates="calculation"
+        back_populates="calculation", cascade_delete=True
     )
 
 

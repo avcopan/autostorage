@@ -23,6 +23,7 @@ The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier 
 
 Nothing commits automatically: call `session.commit()`.
 Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians), and `IdentityStationaryLink.identity_cache` as zlib-compressed JSON by `CompressedJSONTypeDecorator`.
+Deleting a row deletes its link rows and the data that needs it (a model's calculations; a geometry's or calculation's properties and stationary points; a calculation's validations), but not geometries, stages, steps, or identities.
 Identities are reached through link rows (`StationaryPointRow.identity_links`, `IdentityRow.stationary_links`); removing a link from either list deletes it.
 
 ## Style

@@ -818,6 +818,93 @@ class TestIdentityRow:
 class TestLinkModels:
     """Tests for link/association table models."""
 
+    @pytest.mark.parametrize("deleted", ["geometry", "calculation", "model"])
+    def test_delete_row_deletes_its_data(
+        self, database: Database, calculation: CalculationRow, deleted: str
+    ) -> None:
+        """Deleting a geometry, calculation, or model deletes the data that needs it.
+
+        Properties, stationary points (with their identity and stage links), and
+        validations go; geometries, stages, steps, and identities are kept.
+        """
+        with database.session() as session:
+            geo = GeometryRow(symbols=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]])
+            stage1, stage2 = StageRow(), StageRow()
+            point = StationaryPointRow(
+                geometry=geo, calculation=calculation, stages=[stage1]
+            )
+            step = StepRow(stage1=stage1, stage2=stage2, is_barrierless=True)
+            step.validations.append(
+                ValidationRow(calculation=calculation, method="irc")
+            )
+            energy = PropertyValueRow(
+                geometry=geo,
+                calculation=calculation,
+                property_kind_name=energy_property_kind.name,
+                value=-1.0,
+            )
+            session.add_all([point, step, energy])
+            session.commit()
+            assert session.exec(select(IdentityStationaryLink)).all()
+
+            rows = {
+                "geometry": geo,
+                "calculation": calculation,
+                "model": calculation.model,
+            }
+            session.delete(rows[deleted])
+            session.commit()
+
+            point_data = [
+                PropertyValueRow,
+                StationaryPointRow,
+                IdentityStationaryLink,
+                StageStationaryLink,
+            ]
+            calculation_data = [*point_data, ValidationRow, StepValidationLink]
+            gone, kept = {
+                "geometry": (point_data, [CalculationRow, ValidationRow]),
+                "calculation": ([*calculation_data, CalculationRow], [GeometryRow]),
+                "model": ([*calculation_data, CalculationRow, ModelRow], [GeometryRow]),
+            }[deleted]
+            for row_cls in gone:
+                assert session.exec(select(row_cls)).all() == [], row_cls
+            for row_cls in [*kept, StageRow, StepRow, IdentityRow]:
+                assert session.exec(select(row_cls)).all(), row_cls
+
+    @pytest.mark.parametrize("deleted", ["geometry", "trajectory", "calculation"])
+    def test_delete_row_deletes_its_links(
+        self, database: Database, calculation: CalculationRow, deleted: str
+    ) -> None:
+        """Deleting a row deletes its link rows, but not the rows they link to."""
+        with database.session() as session:
+            geo = GeometryRow(symbols=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]])
+            traj = TrajectoryRow()
+            traj.geometry_links.append(GeometryTrajectoryLink(geometry=geo, index=[0]))
+            calculation.geometry_links.append(
+                CalculationGeometryLink(geometry=geo, role=Role.INPUT)
+            )
+            calculation.trajectory_links.append(
+                CalculationTrajectoryLink(trajectory=traj, role=Role.OUTPUT)
+            )
+            rows = {"geometry": geo, "trajectory": traj, "calculation": calculation}
+            session.add_all(rows.values())
+            session.commit()
+
+            session.delete(rows[deleted])
+            session.commit()
+
+            links = {
+                "geometry": [GeometryTrajectoryLink, CalculationGeometryLink],
+                "trajectory": [GeometryTrajectoryLink, CalculationTrajectoryLink],
+                "calculation": [CalculationGeometryLink, CalculationTrajectoryLink],
+            }
+            for link_cls in links[deleted]:
+                assert session.exec(select(link_cls)).all() == []
+            for name, row in rows.items():
+                if name != deleted:
+                    assert session.get(type(row), row.id) is not None
+
     def test_calculation_geometry_link(self, database: Database) -> None:
         """CalculationGeometryLink can be created with role."""
         with database.session() as session:
