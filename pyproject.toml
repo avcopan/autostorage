@@ -17,6 +17,15 @@ dependencies = [
 ]
 requires-python = ">= 3.13"
 
+[project.optional-dependencies]
+gui = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+autostorage = "autostorage.gui.cli:main"
+
 [project.urls]
 Repository = "https://github.com/avcopan/autostorage"
 Documentation = "https://avcopan.github.io/autostorage/"

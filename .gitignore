@@ -42,3 +42,8 @@ _great_docs_build/
 # Local build outputs and lockfiles
 docs/
 uv.lock
+
+# GUI: Node packages, the built front end, and the demo database
+node_modules/
+/src/autostorage/gui/static/
+/demo.db
