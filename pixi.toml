@@ -29,14 +29,17 @@ autogeom = "autogeom"  # from the avcopan/automech channel
 
 [environments]
 default = { solve-group = "default" }
-test = { features = ["test"], solve-group = "default"}
-dev = { features = ["dev", "test"], solve-group = "default"}
+test = { features = ["test", "gui"], solve-group = "default"}
+dev = { features = ["dev", "test", "gui", "frontend"], solve-group = "default"}
+# The browser GUI (see GUI.md)
+gui = { features = ["gui", "frontend"], solve-group = "default" }
 # Test with the lowest versions allowed by the lower bounds on the dependencies
-test-lowest = { features = ["test", "lowest"] }
+test-lowest = { features = ["test", "gui", "lowest"] }
 
 [feature.test.dependencies]
 pytest = ">=9.1.1"
 pytest-cov = ">=7.1.0"
+httpx = "*"  # for FastAPI's TestClient
 
 [feature.test.tasks]
 test = { cmd = "pytest", default-environment = "test" }
@@ -60,6 +63,22 @@ libstdcxx-ng = ">=13"
 # to ancient source-only releases that fail to build
 [feature.lowest.pypi-options]
 no-build = true
+
+[feature.gui.dependencies]
+fastapi = ">=0.115"
+uvicorn = ">=0.30"
+
+# Node.js builds the front end (frontend/); users of the built package don't need it
+[feature.frontend.dependencies]
+nodejs = "*"
+
+[feature.frontend.tasks]
+# `gui-api` builds the page and serves it; `gui-dev` adds live reload (see GUI.md)
+gui-install = { cmd = "npm install", cwd = "frontend", default-environment = "gui" }
+gui-api = { cmd = "autostorage view --no-browser", depends-on = ["gui-build"], default-environment = "gui" }
+gui-dev = { cmd = "npm run dev", cwd = "frontend", depends-on = ["gui-install"], default-environment = "gui" }
+gui-build = { cmd = "npm run build", cwd = "frontend", depends-on = ["gui-install"], default-environment = "gui" }
+view = { cmd = "autostorage view", depends-on = ["gui-build"], default-environment = "gui" }
 
 [feature.dev.dependencies]
 # Dependency management

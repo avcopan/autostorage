@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+- **A browser GUI starter** (`autostorage view`, with the `gui` extra): a FastAPI back end in `autostorage.gui` and a Vite + React + Tailwind front end in `frontend/`, so far a hello-world page. See `GUI.md`.
 
 ## [0.0.23] - 2026-11-19
 ### Added
