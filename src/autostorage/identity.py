@@ -1,12 +1,12 @@
 """Identity algorithm registry with default definitions."""
 
 from collections.abc import Iterable, Mapping
-from typing import ClassVar, Protocol, Self, runtime_checkable
+from dataclasses import dataclass
+from typing import ClassVar, Protocol, runtime_checkable
 
 import autogeom
 from autogeom import Geometry
 from protomol import AnyGraph
-from pydantic import BaseModel, ConfigDict, model_validator
 
 from .types import IdentityKind
 
@@ -43,7 +43,8 @@ class IdentityProtocol(Protocol):
         ...
 
 
-class IdentityAlgorithm(BaseModel):
+@dataclass(frozen=True)
+class IdentityAlgorithm:
     """A registered identity algorithm.
 
     Attributes:
@@ -60,8 +61,6 @@ class IdentityAlgorithm(BaseModel):
             skipped for a saddle point without one.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
     name: str
     kind: IdentityKind
     identity_fn: IdentityProtocol
@@ -73,11 +72,19 @@ class IdentityAlgorithm(BaseModel):
         """Check whether algorithm applies to a given order."""
         return self.orders is None or order in self.orders
 
-    @model_validator(mode="after")
-    def _check_parent_orders(self) -> Self:
-        """Requires the orders to be a subset of the parent's orders."""
+    def __post_init__(self) -> None:
+        """Check the function and that the orders are a subset of the parent's.
+
+        Raises:
+            TypeError: If `identity_fn` isn't callable.
+            ValueError: If the orders aren't a subset of the parent's orders.
+        """
+        if not callable(self.identity_fn):
+            msg = f"Identity function of {self.name!r} is not callable."
+            raise TypeError(msg)
+
         if self.parent is None or self.parent.orders is None:
-            return self
+            return
 
         if self.orders is None or not self.orders <= self.parent.orders:
             child = "all" if self.orders is None else sorted(self.orders)
@@ -88,8 +95,6 @@ class IdentityAlgorithm(BaseModel):
                 f"algorithm {self.parent.name}."
             )
             raise ValueError(msg)
-
-        return self
 
 
 class IdentityAlgorithmRegistry:

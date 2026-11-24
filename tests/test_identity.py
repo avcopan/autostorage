@@ -1,13 +1,13 @@
 """Identity module tests."""
 
 from collections.abc import Mapping
+from dataclasses import FrozenInstanceError
 
 import numpy as np
 import protomol
 import pytest
 from autogeom import Geometry
 from protomol import AnyGraph
-from pydantic import ValidationError
 
 from autostorage import GeometryRow
 from autostorage.identity import (
@@ -115,7 +115,7 @@ class TestIdentityAlgorithmRegistry:
 
         # Order restriction must be compatible with parent
         #  => This raises an error:
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError, match="not compatible"):
             algorithm = IdentityAlgorithmRegistry.register(
                 name="atom_count",
                 kind=IdentityKind.FORMULA,
@@ -192,14 +192,16 @@ class TestIdentityAlgorithm:
 
     def test_frozen(self) -> None:
         """Algorithms cannot be modified after registration."""
-        with pytest.raises(ValidationError, match="frozen"):
+        with pytest.raises(FrozenInstanceError):
             rdkit_inchi.name = "other"  # ty: ignore[invalid-assignment]
 
     def test_rejects_non_callable(self) -> None:
         """An identity function must be callable."""
-        with pytest.raises(ValidationError):
-            IdentityAlgorithm.model_validate(
-                {"name": "bad", "kind": "formula", "identity_fn": "not callable"}
+        with pytest.raises(TypeError, match="not callable"):
+            IdentityAlgorithm(
+                name="bad",
+                kind=IdentityKind.FORMULA,
+                identity_fn="not callable",  # ty: ignore[invalid-argument-type]
             )
 
 

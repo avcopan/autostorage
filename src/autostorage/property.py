@@ -1,12 +1,12 @@
 """Property kind registry with default definitions."""
 
+from dataclasses import dataclass
 from typing import ClassVar, Protocol, runtime_checkable
 
 import numpy as np
 import numpy.typing as npt
 import pint
 from autogeom import ureg
-from pydantic import BaseModel, ConfigDict, field_validator
 
 from .models import GeometryRow
 
@@ -29,7 +29,8 @@ class PropertyValidationProtocol(Protocol):
         ...
 
 
-class PropertyKind(BaseModel):
+@dataclass(frozen=True)
+class PropertyKind:
     """A registered kind of property.
 
     Attributes:
@@ -39,23 +40,30 @@ class PropertyKind(BaseModel):
         dtype: NumPy dtype used to store values of this kind.
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
     name: str
     validation_fn: PropertyValidationProtocol
     units: str
     dtype: type[np.floating] = np.float64
 
-    @field_validator("units")
-    @classmethod
-    def _check_units(cls, units: str) -> str:
-        """Check that `units` is a unit `pint` can parse."""
+    def __post_init__(self) -> None:
+        """Check the function, units and dtype.
+
+        Raises:
+            TypeError: If `validation_fn` isn't callable or `dtype` isn't a
+                NumPy floating type.
+            ValueError: If `pint` can't parse `units`.
+        """
+        if not callable(self.validation_fn):
+            msg = f"Validation function of {self.name!r} is not callable."
+            raise TypeError(msg)
+        if not (isinstance(self.dtype, type) and issubclass(self.dtype, np.floating)):
+            msg = f"Expected a NumPy floating dtype but got {self.dtype!r}."
+            raise TypeError(msg)
         try:
-            ureg.Unit(units)
+            ureg.Unit(self.units)
         except (pint.UndefinedUnitError, AttributeError, TypeError, ValueError) as err:
-            msg = f"Invalid units {units!r}: {err}"
+            msg = f"Invalid units {self.units!r}: {err}"
             raise ValueError(msg) from err
-        return units
 
     def to_native(self, value: object) -> npt.NDArray:
         """Return `value` as an array in native units and the storage dtype.

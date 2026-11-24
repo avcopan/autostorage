@@ -65,8 +65,7 @@ If autostorage needs a conversion that autogeom lacks, add it to autogeom.
 
 Identity algorithms, model hash algorithms and property kinds are registered in memory (`IdentityAlgorithmRegistry` in `identity.py`, `ModelHashAlgorithmRegistry` in `model_hash.py`, `PropertyKindRegistry` in `property.py`) and mirrored by name into `IdentityAlgorithmRow`, `ModelHashAlgorithmRow` and `PropertyKindRow` when a `Database` is opened.
 The registry holds the behavior (functions, dtypes), and the row only holds the name and its metadata.
-Keep the registries alike: a frozen object, with `register` and `get` class methods.
-New registries use a frozen dataclass, since the entries hold a callable and are never serialized; `IdentityAlgorithm` and `PropertyKind` are still Pydantic models and will follow.
+Keep the registries alike: a frozen dataclass (the entries hold a callable and are never serialized), checked in `__post_init__`, with `register` and `get` class methods.
 
 ### Layers
 

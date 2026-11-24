@@ -46,6 +46,25 @@ class TestPropertyKind:
                 units="nope",
             )
 
+    def test_rejects_non_callable(self) -> None:
+        """A validation function must be callable."""
+        with pytest.raises(TypeError, match="not callable"):
+            PropertyKind(
+                name="x",
+                validation_fn="nope",  # ty: ignore[invalid-argument-type]
+                units="hartree",
+            )
+
+    def test_rejects_non_floating_dtype(self) -> None:
+        """The storage dtype must be a NumPy floating type."""
+        with pytest.raises(TypeError, match="floating dtype"):
+            PropertyKind(
+                name="x",
+                validation_fn=energy_property_kind.validation_fn,
+                units="hartree",
+                dtype=np.int64,  # ty: ignore[invalid-argument-type]
+            )
+
     def test_to_native_plain_value(self) -> None:
         """Values without units are assumed to be in native units."""
         value = hessian_property_kind.to_native([[1, 2], [3, 4]])
