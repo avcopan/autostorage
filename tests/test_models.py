@@ -20,6 +20,7 @@ from autostorage import (
     hessian_property_kind,
 )
 from autostorage.database import Database
+from autostorage.domain import Calculation, Model
 from autostorage.models import (
     CalculationGeometryLink,
     CalculationRow,
@@ -589,6 +590,27 @@ class TestModelRow:
             model = session.exec(select(ModelRow)).one()
             assert model.keywords == {"scf_type": "df"}
 
+    def test_is_model(self) -> None:
+        """A ModelRow is a Model."""
+        assert isinstance(ModelRow(program="orca", method="b3lyp"), Model)
+
+    def test_round_trip_from_model(self) -> None:
+        """ModelRow(**model.model_dump()) keeps every field."""
+        model = Model(
+            program="orca",
+            program_version="6.1.1",
+            method="mp2",
+            basis="cc-pvdz",
+            keywords={"TightSCF": True},
+        )
+        row = ModelRow(**model.model_dump())
+        assert row.model_dump(exclude={"id"}) == model.model_dump()
+
+    def test_none_keywords_to_model(self) -> None:
+        """A row with `keywords=None` converts to a Model with empty keywords."""
+        row = ModelRow(program="orca", method="b3lyp", keywords=None)
+        assert Model(**row.model_dump()).keywords == {}
+
 
 class TestCalculationRow:
     """Tests for CalculationRow model."""
@@ -658,6 +680,28 @@ class TestCalculationRow:
             calc = session.exec(select(CalculationRow)).one()
             assert calc.input_provenance == {"source": "test", "step": 2}
             assert calc.output_provenance == {}
+
+    def test_is_calculation(self) -> None:
+        """A CalculationRow is a Calculation."""
+        assert isinstance(CalculationRow(calc_type="energy"), Calculation)
+
+    def test_round_trip_from_calculation(self) -> None:
+        """CalculationRow(**calc.model_dump()) keeps every field."""
+        calc = Calculation(
+            calc_type="optimization",
+            input_provenance={"optimizer": "geometric"},
+            output_provenance={"status": "success"},
+        )
+        row = CalculationRow(**calc.model_dump())
+        assert row.model_dump(exclude={"id", "model_id"}) == calc.model_dump()
+
+    def test_none_provenance_to_calculation(self) -> None:
+        """A row with `None` provenance converts to a Calculation with empty dicts."""
+        row = CalculationRow(
+            calc_type="energy", input_provenance=None, output_provenance=None
+        )
+        calc = Calculation(**row.model_dump())
+        assert calc.input_provenance == calc.output_provenance == {}
 
 
 class TestResultRows:

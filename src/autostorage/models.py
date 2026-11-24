@@ -27,6 +27,7 @@ from sqlmodel import (
 )
 from sqlmodel.main import SQLModelConfig
 
+from .domain import Calculation, Model
 from .types import (
     AxisKind,
     CompressedArrayTypeDecorator,
@@ -489,27 +490,26 @@ class TrajectoryRow(SQLModel, table=True):
         return view
 
 
-class ModelRow(SQLModel, table=True):
+class ModelRow(SQLModel, Model, table=True):
     """Calculation model specification.
 
     Attributes:
         id: Primary key.
         program: Quantum chemistry program used (psi4, ORCA, ...)
-        program_version: Quantum chemistry program version.
+        program_version: Quantum chemistry program version (recorded, never hashed).
         method: Computational method (B3LYP, MP2, ...)
         basis: Orbital basis set.
-        keywords: Additional keywords and options for the calculation.
+        keywords: Electronic-structure keywords only; optimizer keywords go in
+            `CalculationRow.input_provenance`. A nested edit needs the dict
+            reassigned, since `MutableDict` tracks only top-level keys.
         calculations: Calculations performed using this model.
     """
 
     __tablename__ = "model"
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
-    program: str
-    program_version: str | None = None
-    method: str
-    basis: str | None = None
-    keywords: dict[str, Any] | None = Field(
+    # The row column is nullable; the domain field is not.
+    keywords: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
 
@@ -518,14 +518,15 @@ class ModelRow(SQLModel, table=True):
     )
 
 
-class CalculationRow(SQLModel, table=True):
+class CalculationRow(SQLModel, Calculation, table=True):
     """Quantum chemistry calculation and its associated data.
 
     Attributes:
         id: Primary key.
         model_id: Foreign key to the model used for this calculation.
         calc_type: Type of calculation (energy, gradient, hessian, etc.).
-        input_provenance: Metadata describing how the input was generated.
+        input_provenance: How the input was generated and run, e.g. optimizer
+            keywords; recorded, never hashed.
         output_provenance: Metadata describing how the output was produced.
         model: Model used for this calculation.
         geometry_links: Raw link rows connecting geometries to this calculation.
@@ -540,11 +541,10 @@ class CalculationRow(SQLModel, table=True):
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     model_id: uuid.UUID | None = _fk_field("model.id")
-    calc_type: str
-    input_provenance: dict[str, Any] | None = Field(
+    input_provenance: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
-    output_provenance: dict[str, Any] | None = Field(
+    output_provenance: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
 

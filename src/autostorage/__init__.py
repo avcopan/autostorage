@@ -2,8 +2,9 @@
 
 __version__ = "0.0.23"
 
-from . import events, identity, query, types
+from . import domain, events, identity, query, types
 from .database import Database
+from .domain import Calculation, Model
 from .events import (
     AutostorageSession,
     IdentityGenerationWarning,
@@ -53,6 +54,7 @@ from .types import AxisKind, IdentityKind, Role
 __all__ = [
     "AutostorageSession",
     "AxisKind",
+    "Calculation",
     "CalculationGeometryLink",
     "CalculationRow",
     "CalculationTrajectoryLink",
@@ -67,6 +69,7 @@ __all__ = [
     "IdentityProtocol",
     "IdentityRow",
     "IdentityStationaryLink",
+    "Model",
     "ModelRow",
     "PropertyKind",
     "PropertyKindRegistry",
@@ -83,6 +86,7 @@ __all__ = [
     "TrajectoryAxisRow",
     "TrajectoryRow",
     "ValidationRow",
+    "domain",
     "energy_property_kind",
     "events",
     "geometry_hash",

@@ -70,6 +70,7 @@ layers = [
     "autostorage.query",
     "autostorage.property | autostorage.identity",
     "autostorage.models",
+    "autostorage.domain",
     "autostorage.types",
 ]
 
