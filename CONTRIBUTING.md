@@ -63,9 +63,10 @@ If autostorage needs a conversion that autogeom lacks, add it to autogeom.
 
 ### Registries
 
-Identity algorithms and property kinds are registered in memory (`IdentityAlgorithmRegistry` in `identity.py`, `PropertyKindRegistry` in `property.py`) and mirrored by name into `IdentityAlgorithmRow` and `PropertyKindRow` when a `Database` is opened.
+Identity algorithms, model hash algorithms and property kinds are registered in memory (`IdentityAlgorithmRegistry` in `identity.py`, `ModelHashAlgorithmRegistry` in `model_hash.py`, `PropertyKindRegistry` in `property.py`) and mirrored by name into `IdentityAlgorithmRow`, `ModelHashAlgorithmRow` and `PropertyKindRow` when a `Database` is opened.
 The registry holds the behavior (functions, dtypes), and the row only holds the name and its metadata.
-Keep the two registries alike: a frozen Pydantic model, with `register` and `get` class methods.
+Keep the registries alike: a frozen object, with `register` and `get` class methods.
+New registries use a frozen dataclass, since the entries hold a callable and are never serialized; `IdentityAlgorithm` and `PropertyKind` are still Pydantic models and will follow.
 
 ### Layers
 
@@ -76,7 +77,8 @@ Modules are layered, and a module may only import from the layers below it.
 autostorage.database                    (highest)
 autostorage.events
 autostorage.query
-autostorage.property | autostorage.identity
+autostorage.property | autostorage.identity | autostorage.model_hash
 autostorage.models
+autostorage.domain
 autostorage.types                       (lowest)
 ```

@@ -24,12 +24,17 @@ from sqlalchemy.orm import Mapper, UOWTransaction, aliased
 from sqlmodel import Session, col, select
 
 from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry
+from .model_hash import ModelHashAlgorithm, ModelHashAlgorithmRegistry
 from .models import (
     GeometryRow,
     GeometryTrajectoryLink,
     IdentityAlgorithmRow,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashAlgorithmRow,
+    ModelHashLink,
+    ModelHashRow,
+    ModelRow,
     PropertyKindRow,
     PropertyValueRow,
     StationaryPointRow,
@@ -50,6 +55,10 @@ class IdentityGenerationWarning(UserWarning):
     """An identity algorithm could not generate an identity for a geometry."""
 
 
+class ModelHashGenerationWarning(UserWarning):
+    """A model hash algorithm could not hash a model."""
+
+
 class StationaryOrderWarning(UserWarning):
     """A stationary point's Hessian does not have the point's `order`."""
 
@@ -57,6 +66,13 @@ class StationaryOrderWarning(UserWarning):
 # Errors that the built-in identity functions raise for unsupported or unperceivable
 # geometries (e.g. metals, no valid Lewis structure, failed InChI generation).
 _IDENTITY_ERRORS = (GeometryConversionError, NotImplementedError, ValueError)
+
+# Errors that a model hash function raises for a model it can't hash (e.g.
+# keywords that aren't JSON-serializable).
+_MODEL_HASH_ERRORS = (TypeError, ValueError, NotImplementedError)
+
+# Model hash values must be shorter than this (portable as an indexed VARCHAR).
+MAX_MODEL_HASH_LENGTH = 255
 
 
 def _ordered_algorithms() -> Iterator[IdentityAlgorithm]:
@@ -85,6 +101,17 @@ def create_identity_algorithms(session: Session) -> None:
             session.add(row)
         row.kind = alg.kind
         row.parent_algorithm_name = parent_name
+    session.commit()
+
+
+def create_model_hash_algorithms(session: Session) -> None:
+    """Create or update a row for every registered model hash algorithm."""
+    for alg in ModelHashAlgorithmRegistry.algorithms:
+        row = session.get(ModelHashAlgorithmRow, alg.name)
+        if row is None:
+            row = ModelHashAlgorithmRow(name=alg.name, kind=alg.kind)
+            session.add(row)
+        row.kind = alg.kind
     session.commit()
 
 
@@ -647,3 +674,112 @@ def add_registry_identities_before_flush(
         obj.identity_links.clear()
     for obj in new + changed:
         _attach_identities(ctx, obj)
+
+
+@dataclass
+class _ModelHashFlushContext:
+    """Per-flush cache of pending `ModelHashRow`s, keyed by algorithm name and value.
+
+    Autoflush is suppressed while "before_flush" handlers run, so hashes created
+    earlier in the same flush are not visible to queries.
+    """
+
+    session: Session
+    cache: dict[tuple[str, str], ModelHashRow] = field(default_factory=dict)
+
+
+def _get_or_create_model_hash(
+    ctx: _ModelHashFlushContext, algorithm_name: str, value: str
+) -> ModelHashRow:
+    """Look up a pending or persisted model hash, creating one if none exists."""
+    key = (algorithm_name, value)
+    hash_row = ctx.cache.get(key)
+    if hash_row is None:
+        hash_row = ctx.session.exec(
+            select(ModelHashRow).where(
+                col(ModelHashRow.algorithm_name) == algorithm_name,
+                col(ModelHashRow.value) == value,
+            )
+        ).one_or_none()
+    if hash_row is None:
+        hash_row = ModelHashRow(algorithm_name=algorithm_name, value=value)
+        ctx.session.add(hash_row)
+    ctx.cache[key] = hash_row
+    return hash_row
+
+
+def _generate_model_hash(algorithm: ModelHashAlgorithm, row: ModelRow) -> str | None:
+    """Run `algorithm` on `row`, warning and returning None on failure."""
+    try:
+        value = algorithm.hash(row)
+    except _MODEL_HASH_ERRORS as err:
+        reason = f"{type(err).__name__}: {err}"
+    else:
+        if not value:
+            reason = "empty hash value."
+        elif len(value) >= MAX_MODEL_HASH_LENGTH:
+            reason = (
+                f"hash value has {len(value)} characters "
+                f"(the limit is under {MAX_MODEL_HASH_LENGTH})."
+            )
+        else:
+            return value
+    msg = f"Skipping {algorithm.name!r} hash for ModelRow {row.id}: {reason}"
+    warnings.warn(msg, ModelHashGenerationWarning, stacklevel=2)
+    return None
+
+
+def _attach_model_hashes(ctx: _ModelHashFlushContext, row: ModelRow) -> None:
+    """Link `row` to a hash row for every registered algorithm that applies.
+
+    If an algorithm fails, a warning is issued and its hash is skipped.
+    """
+    for algorithm in ModelHashAlgorithmRegistry.algorithms:
+        if not algorithm.applies_to(row.program):
+            continue
+        value = _generate_model_hash(algorithm, row)
+        if value is None:
+            continue
+        hash_row = _get_or_create_model_hash(ctx, algorithm.name, value)
+        if all(link.hash is not hash_row for link in row.hash_links):
+            row.hash_links.append(ModelHashLink(hash=hash_row))
+
+
+def _model_hash_inputs_changed(row: ModelRow) -> bool:
+    """Return whether the program, method, basis or keywords of a model changed."""
+    state = inspect(row)
+    if state is None:
+        return False
+    return any(
+        state.attrs[name].history.has_changes()
+        for name in ("program", "method", "basis", "keywords")
+    )
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def add_model_hashes_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Attach registry model hashes to new models.
+
+    Generates and attaches a `ModelHashRow` for every registered algorithm that
+    applies to the model's program (e.g. `minimal@1`, `exact@1`). Hashes of
+    persisted models are regenerated if their program, method, basis or
+    keywords change.
+    """
+    new = [obj for obj in session.new if isinstance(obj, ModelRow)]
+    changed = [
+        obj
+        for obj in session.dirty
+        if isinstance(obj, ModelRow) and _model_hash_inputs_changed(obj)
+    ]
+    if not new and not changed:
+        return
+
+    ctx = _ModelHashFlushContext(session=session)
+    for row in changed:
+        row.hash_links.clear()
+    for row in new + changed:
+        _attach_model_hashes(ctx, row)

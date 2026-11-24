@@ -2,11 +2,13 @@
 
 __version__ = "0.0.23"
 
-from . import events, identity, query, types
+from . import domain, events, identity, model_hash, query, types
 from .database import Database
+from .domain import Calculation, Model
 from .events import (
     AutostorageSession,
     IdentityGenerationWarning,
+    ModelHashGenerationWarning,
     StationaryOrderWarning,
 )
 from .identity import (
@@ -18,6 +20,13 @@ from .identity import (
     rdkit_inchi_conn,
     rdkit_smiles,
 )
+from .model_hash import (
+    ModelHashAlgorithm,
+    ModelHashAlgorithmRegistry,
+    ModelHashProtocol,
+    exact_hash,
+    minimal_hash,
+)
 from .models import (
     CalculationGeometryLink,
     CalculationRow,
@@ -27,6 +36,9 @@ from .models import (
     IdentityAlgorithmRow,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashAlgorithmRow,
+    ModelHashLink,
+    ModelHashRow,
     ModelRow,
     PropertyKindRow,
     PropertyValueRow,
@@ -48,11 +60,12 @@ from .property import (
     gradient_property_kind,
     hessian_property_kind,
 )
-from .types import AxisKind, IdentityKind, Role
+from .types import AxisKind, IdentityKind, ModelHashKind, Role
 
 __all__ = [
     "AutostorageSession",
     "AxisKind",
+    "Calculation",
     "CalculationGeometryLink",
     "CalculationRow",
     "CalculationTrajectoryLink",
@@ -67,6 +80,15 @@ __all__ = [
     "IdentityProtocol",
     "IdentityRow",
     "IdentityStationaryLink",
+    "Model",
+    "ModelHashAlgorithm",
+    "ModelHashAlgorithmRegistry",
+    "ModelHashAlgorithmRow",
+    "ModelHashGenerationWarning",
+    "ModelHashKind",
+    "ModelHashLink",
+    "ModelHashProtocol",
+    "ModelHashRow",
     "ModelRow",
     "PropertyKind",
     "PropertyKindRegistry",
@@ -83,13 +105,17 @@ __all__ = [
     "TrajectoryAxisRow",
     "TrajectoryRow",
     "ValidationRow",
+    "domain",
     "energy_property_kind",
     "events",
+    "exact_hash",
     "geometry_hash",
     "gradient_property_kind",
     "hessian_property_kind",
     "hill_formula",
     "identity",
+    "minimal_hash",
+    "model_hash",
     "query",
     "rdkit_inchi",
     "rdkit_inchi_conn",

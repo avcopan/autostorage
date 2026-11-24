@@ -13,6 +13,7 @@ from sqlmodel import col, select
 from autostorage import (
     AutostorageSession,
     IdentityAlgorithmRegistry,
+    ModelHashAlgorithmRegistry,
     PropertyKindRegistry,
     events,
 )
@@ -22,6 +23,7 @@ from autostorage.models import (
     CalculationRow,
     IdentityAlgorithmRow,
     IdentityRow,
+    ModelHashAlgorithmRow,
     ModelRow,
     PropertyKindRow,
 )
@@ -271,6 +273,16 @@ class TestRegistryTablesPrePopulated:
                     )
                     assert parent is not None
                     assert parent.name == alg.parent.name
+
+    def test_model_hash_algorithms_populated(self, database: Database) -> None:
+        """`model_hash_algorithm` has a row per registered algorithm."""
+        with database.session() as sess:
+            names = {a.name for a in ModelHashAlgorithmRegistry.algorithms}
+            assert {"minimal@1", "exact@1"} <= names
+            for alg in ModelHashAlgorithmRegistry.algorithms:
+                row = sess.get(ModelHashAlgorithmRow, alg.name)
+                assert row is not None
+                assert row.kind == alg.kind
 
     def test_property_kinds_populated(self, database: Database) -> None:
         """`property_kind` table populated from registry at initialization."""

@@ -12,9 +12,13 @@ from autostorage import (
     GeometryRow,
     IdentityAlgorithm,
     IdentityAlgorithmRow,
+    Model,
+    ModelHashAlgorithm,
+    ModelHashAlgorithmRow,
     ModelRow,
     StationaryPointRow,
     hill_formula,
+    minimal_hash,
     query,
     rdkit_inchi,
 )
@@ -91,3 +95,62 @@ def test_no_match(database: Database) -> None:
         stmt = query.stationary_point_by_identity(rdkit_inchi, "InChI=1S/X")
 
         assert session.exec(stmt).all() == []
+
+
+@pytest.fixture
+def model_database(tmp_path: Path) -> Generator[Database]:
+    """Database with two b3lyp/6-31g* models that differ in keywords, and an HF one."""
+    with Database(tmp_path / "models.db") as db:
+        with db.session() as session:
+            session.add_all(
+                [
+                    ModelRow(
+                        program="orca",
+                        method="B3LYP",
+                        basis="6-31G*",
+                        keywords={"TightSCF": True},
+                    ),
+                    ModelRow(program="psi4", method="b3lyp", basis="6-31g*"),
+                    ModelRow(program="psi4", method="hf", basis="sto-3g"),
+                ]
+            )
+            session.commit()
+        yield db
+
+
+@pytest.mark.parametrize("algorithm", [minimal_hash, "minimal@1"])
+def test_model_by_hash(
+    model_database: Database, algorithm: ModelHashAlgorithm | str
+) -> None:
+    """Models sharing a minimal@1 value are all selected, by algorithm or name."""
+    with model_database.session() as session:
+        stmt = query.model_by_hash(algorithm, "b3lyp/6-31g*")
+        models = session.exec(stmt).all()
+
+        assert sorted(m.program for m in models) == ["orca", "psi4"]
+
+
+def test_model_by_hash_from_model(model_database: Database) -> None:
+    """A hash computed from an in-memory model finds the stored models."""
+    value = minimal_hash.hash(Model(program="orca", method="B3LYP", basis="6-31G*"))
+    with model_database.session() as session:
+        stmt = query.model_by_hash(minimal_hash, value)
+
+        assert len(session.exec(stmt).all()) == 2
+
+
+def test_model_by_hash_row(model_database: Database) -> None:
+    """Models can be selected by `ModelHashAlgorithmRow`."""
+    with model_database.session() as session:
+        alg = session.get(ModelHashAlgorithmRow, "minimal@1")
+        assert alg is not None
+        stmt = query.model_by_hash(alg, "hf/sto-3g")
+
+        assert [m.program for m in session.exec(stmt).all()] == ["psi4"]
+
+
+def test_model_by_hash_no_match(model_database: Database) -> None:
+    """Unknown hash values, and the wrong algorithm, select nothing."""
+    with model_database.session() as session:
+        assert session.exec(query.model_by_hash("minimal@1", "mp2/cc-pvdz")).all() == []
+        assert session.exec(query.model_by_hash("exact@1", "b3lyp/6-31g*")).all() == []

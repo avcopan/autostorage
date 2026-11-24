@@ -1,0 +1,93 @@
+---
+title: "Model Hashes"
+guide-section: "User Guide"
+---
+
+# Model Hashes
+
+A model hash is a string that says what electronic-structure model a calculation used, so that "is this calculation already done?" becomes a query.
+Which settings count as part of the model depends on the program and on the study: usually only the method and basis matter, but in a benchmark every keyword can.
+So, like identities, hashes come from a registry of **model hash algorithms**, and each algorithm groups the models in a database by a value.
+
+## The model, and what is not in it
+
+A `ModelRow` (a `Model`) holds the electronic structure only: `program`, `program_version`, `method`, `basis`, and `keywords`.
+`keywords` are the keywords that change the result, as passed to ORCA, Psi4, and so on; energy convergence settings (such as SCF thresholds) belong there.
+
+Optimizer keywords (geomeTRIC, Sella, ...) go in `CalculationRow.input_provenance`.
+They are recorded there but never hashed.
+autostorage can't enforce the split, so it is up to you.
+If you put optimizer keywords on the model, `minimal@1` is still correct, and you can register a hash that ignores them.
+
+`program_version` is recorded but never hashed.
+Two identical models are two rows, and they share their hash rows.
+
+## Built-in algorithms
+
+| algorithm | kind | programs | value |
+|---|---|---|---|
+| `minimal@1` | `minimal` | any | `method/basis`, stripped and lower-cased, e.g. `b3lyp/6-31g*`; just the method if there is no basis |
+| `exact@1` | `exact` | any | SHA-256 of the canonical JSON of program, method, basis, and keywords, exactly as given (no case folding) |
+
+The `@1` versions the algorithm: a changed function gets a new name (`minimal@2`), so stored hashes never change meaning.
+
+When a `ModelRow` is added through a `Database.session()`, a `ModelHashRow` is attached to it for every registered algorithm that applies to its program.
+Hashes are regenerated if the `program`, `method`, `basis`, or `keywords` change.
+A nested edit of `keywords` is not noticed: reassign the dict (`model.keywords = {**model.keywords, ...}`).
+If a hash function raises a `TypeError`, `ValueError`, or `NotImplementedError`, or returns an empty string, a `ModelHashGenerationWarning` is issued and that hash is skipped.
+
+Models stored before this feature, or before an algorithm was registered, get no hash links until their inputs change: there is no backfill.
+
+## Is this already done?
+
+Hash an in-memory model and look it up with `query.model_by_hash`:
+
+```python
+from autostorage import Database, Model, exact_hash, minimal_hash, query
+
+model = Model(program="orca", method="B3LYP", basis="6-31G*")
+
+with Database(":memory:") as db, db.session() as session:
+    stmt = query.model_by_hash(minimal_hash, minimal_hash.hash(model))
+    similar = session.exec(stmt).all()  # any program or keywords
+    stmt = query.model_by_hash(exact_hash, exact_hash.hash(model))
+    same = session.exec(stmt).all()  # this program and these keywords
+```
+
+## Registering your own algorithm
+
+Register an algorithm before opening the `Database`, which mirrors the registry into its `model_hash_algorithm` table.
+The foreign key is enforced, so a model hashed by an unseeded algorithm fails on flush.
+
+```python
+import hashlib
+
+from autostorage import Database, ModelHashAlgorithmRegistry, ModelHashKind
+
+
+def orca_scf_hash_fn(program, method, basis, keywords):
+    """Method, basis, and the SCF keywords that change an ORCA result."""
+    scf = sorted(k.lower() for k in (keywords or {}) if k.lower().endswith("scf"))
+    text = f"{method}/{basis}/{','.join(scf)}".lower()
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+orca_scf = ModelHashAlgorithmRegistry.register(
+    name="orca_scf@1",
+    kind=ModelHashKind.FINE,
+    hash_fn=orca_scf_hash_fn,
+    programs={"orca"},  # only ORCA models get this hash
+)
+
+db = Database(":memory:")  # new ORCA models now also get an orca_scf@1 hash
+db.close()
+```
+
+Names must be unique, hash values must be under 255 characters (longer ones are skipped with a warning, so hash them yourself).
+Unlike identity algorithms, model hash algorithms have no parent: a model's hash depends on that model alone.
+`ModelHashAlgorithmRegistry.get(name)` returns a registered algorithm.
+
+## Next steps
+
+- [Data models](../user-guide/models.qmd): the `ModelHashAlgorithmRow`, `ModelHashRow`, and `ModelHashLink` tables.
+- [Identities](../user-guide/identities.qmd): the same design, for stationary points.

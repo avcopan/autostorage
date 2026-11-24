@@ -27,11 +27,13 @@ from sqlmodel import (
 )
 from sqlmodel.main import SQLModelConfig
 
+from .domain import Calculation, Model
 from .types import (
     AxisKind,
     CompressedArrayTypeDecorator,
     CompressedJSONTypeDecorator,
     IdentityKind,
+    ModelHashKind,
     Role,
 )
 
@@ -82,6 +84,7 @@ def geometry_hash(geo: Geometry) -> str:
 
 # 0. Link rows
 # NOTE: Link tables are named by the two entities they connect, in alphabetical order.
+# `ModelHashLink` is an exception: the rule would give `ModelModelHashLink`.
 class CalculationGeometryLink(SQLModel, table=True):
     """Association table linking geometries to a calculation."""
 
@@ -209,6 +212,26 @@ class IdentityStationaryLink(SQLModel, table=True):
     """The linked `StationaryPointRow`."""
     identity: "IdentityRow" = Relationship(back_populates="stationary_links")
     """The linked `IdentityRow`."""
+
+
+class ModelHashLink(SQLModel, table=True):
+    """Association table linking model hashes to models.
+
+    Removing a link from `ModelRow.hash_links` or `ModelHashRow.model_links`
+    deletes it.
+    """
+
+    __tablename__ = "model_hash_link"
+    __table_args__ = (Index("ix_model_hash_link_hash_id", "hash_id"),)
+
+    model_id: uuid.UUID | None = _link_fk_field("model.id")
+    """Foreign key to the linked `ModelRow`."""
+    hash_id: uuid.UUID | None = _link_fk_field("model_hash.id")
+    """Foreign key to the linked `ModelHashRow`."""
+    model: "ModelRow" = Relationship(back_populates="hash_links")
+    """The linked `ModelRow`."""
+    hash: "ModelHashRow" = Relationship(back_populates="model_links")
+    """The linked `ModelHashRow`."""
 
 
 # 1. Existential data rows
@@ -489,43 +512,47 @@ class TrajectoryRow(SQLModel, table=True):
         return view
 
 
-class ModelRow(SQLModel, table=True):
+class ModelRow(SQLModel, Model, table=True):
     """Calculation model specification.
 
     Attributes:
         id: Primary key.
         program: Quantum chemistry program used (psi4, ORCA, ...)
-        program_version: Quantum chemistry program version.
+        program_version: Quantum chemistry program version (recorded, never hashed).
         method: Computational method (B3LYP, MP2, ...)
         basis: Orbital basis set.
-        keywords: Additional keywords and options for the calculation.
+        keywords: Electronic-structure keywords only; optimizer keywords go in
+            `CalculationRow.input_provenance`. A nested edit needs the dict
+            reassigned, since `MutableDict` tracks only top-level keys.
         calculations: Calculations performed using this model.
+        hash_links: Link rows to the hashes of this model, set on flush.
     """
 
     __tablename__ = "model"
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
-    program: str
-    program_version: str | None = None
-    method: str
-    basis: str | None = None
-    keywords: dict[str, Any] | None = Field(
+    # The row column is nullable; the domain field is not.
+    keywords: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
 
     calculations: list["CalculationRow"] = Relationship(
         back_populates="model", cascade_delete=True
     )
+    hash_links: list["ModelHashLink"] = Relationship(
+        back_populates="model", cascade_delete=True
+    )
 
 
-class CalculationRow(SQLModel, table=True):
+class CalculationRow(SQLModel, Calculation, table=True):
     """Quantum chemistry calculation and its associated data.
 
     Attributes:
         id: Primary key.
         model_id: Foreign key to the model used for this calculation.
         calc_type: Type of calculation (energy, gradient, hessian, etc.).
-        input_provenance: Metadata describing how the input was generated.
+        input_provenance: How the input was generated and run, e.g. optimizer
+            keywords; recorded, never hashed.
         output_provenance: Metadata describing how the output was produced.
         model: Model used for this calculation.
         geometry_links: Raw link rows connecting geometries to this calculation.
@@ -540,11 +567,10 @@ class CalculationRow(SQLModel, table=True):
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     model_id: uuid.UUID | None = _fk_field("model.id")
-    calc_type: str
-    input_provenance: dict[str, Any] | None = Field(
+    input_provenance: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
-    output_provenance: dict[str, Any] | None = Field(
+    output_provenance: dict[str, Any] | None = Field(  # ty: ignore[invalid-attribute-override]
         default_factory=dict, sa_column=_json_dict_column()
     )
 
@@ -822,4 +848,48 @@ class IdentityRow(SQLModel, table=True):
     algorithm: "IdentityAlgorithmRow" = Relationship(back_populates="identities")
     stationary_links: list["IdentityStationaryLink"] = Relationship(
         back_populates="identity", cascade_delete=True
+    )
+
+
+# 5. Model hash rows
+class ModelHashAlgorithmRow(SQLModel, table=True):
+    """A model hash algorithm, mirroring a `ModelHashAlgorithm`.
+
+    Attributes:
+        name: Primary key; the registered algorithm name (e.g. ``minimal@1``).
+        kind: How fine-grained the hash is (``minimal``, ``fine``, ``exact``).
+    """
+
+    __tablename__ = "model_hash_algorithm"
+    model_config = SQLModelConfig(arbitrary_types_allowed=True)
+
+    name: str = Field(primary_key=True)
+    kind: ModelHashKind
+
+    hashes: list["ModelHashRow"] = Relationship(back_populates="algorithm")
+
+
+class ModelHashRow(SQLModel, table=True):
+    """A model hash value shared by one or more models.
+
+    Attributes:
+        id: Primary key.
+        algorithm_name: Foreign key to the generating `ModelHashAlgorithmRow`.
+        algorithm: Algorithm that generated the hash.
+        value: The hash value (under 255 characters).
+        model_links: Link rows to the models sharing this hash.
+    """
+
+    __tablename__ = "model_hash"
+    __table_args__ = (
+        UniqueConstraint("algorithm_name", "value", name="unique_model_hash"),
+    )
+
+    id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
+    algorithm_name: str | None = _fk_field("model_hash_algorithm.name")
+    value: str
+
+    algorithm: "ModelHashAlgorithmRow" = Relationship(back_populates="hashes")
+    model_links: list["ModelHashLink"] = Relationship(
+        back_populates="hash", cascade_delete=True
     )
