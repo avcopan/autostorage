@@ -30,6 +30,9 @@ from autostorage.models import (
     IdentityAlgorithmRow,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashAlgorithmRow,
+    ModelHashLink,
+    ModelHashRow,
     ModelRow,
     PropertyValueRow,
     StageRow,
@@ -41,7 +44,7 @@ from autostorage.models import (
     TrajectoryRow,
     ValidationRow,
 )
-from autostorage.types import AxisKind, Role
+from autostorage.types import AxisKind, ModelHashKind, Role
 
 
 @pytest.fixture
@@ -1057,6 +1060,78 @@ class TestIdentityRow:
             session.commit()
 
             assert identity.stationary_links == []
+
+
+class TestModelHashRow:
+    """Tests for ModelHashRow and ModelHashLink."""
+
+    @staticmethod
+    def _algorithm(session: Session) -> ModelHashAlgorithmRow:
+        """Add a hand-seeded algorithm row."""
+        algorithm = ModelHashAlgorithmRow(name="test@1", kind=ModelHashKind.MINIMAL)
+        session.add(algorithm)
+        session.flush()
+        return algorithm
+
+    def test_unique_algorithm_value(self, database: Database) -> None:
+        """A model hash value is unique within an algorithm."""
+        with database.session() as session:
+            algorithm = self._algorithm(session)
+            session.add(ModelHashRow(algorithm_name=algorithm.name, value="a"))
+            session.flush()
+            session.add(ModelHashRow(algorithm_name=algorithm.name, value="a"))
+            with pytest.raises(IntegrityError):
+                session.flush()
+
+    def test_link_shared_by_two_models(self, database: Database) -> None:
+        """Two models can share a hash row."""
+        with database.session() as session:
+            algorithm = self._algorithm(session)
+            hash_row = ModelHashRow(algorithm_name=algorithm.name, value="a")
+            models = [ModelRow(program="p", method="m") for _ in range(2)]
+            for model in models:
+                model.hash_links.append(ModelHashLink(hash=hash_row))
+            session.add_all(models)
+            session.commit()
+
+            assert len(hash_row.model_links) == 2
+            assert {link.model.id for link in hash_row.model_links} == {
+                m.id for m in models
+            }
+            assert hash_row.algorithm.name == "test@1"
+            assert algorithm.hashes == [hash_row]
+
+    def test_delete_model_keeps_hash_row(self, database: Database) -> None:
+        """Deleting a model deletes its links but not the hash row."""
+        with database.session() as session:
+            algorithm = self._algorithm(session)
+            hash_row = ModelHashRow(algorithm_name=algorithm.name, value="a")
+            model = ModelRow(program="p", method="m")
+            model.hash_links.append(ModelHashLink(hash=hash_row))
+            session.add(model)
+            session.commit()
+
+            session.delete(model)
+            session.commit()
+
+            assert session.exec(select(ModelHashLink)).all() == []
+            assert session.exec(select(ModelHashRow)).all() == [hash_row]
+
+    def test_removing_hash_link_deletes_it(self, database: Database) -> None:
+        """Removing a link from `ModelRow.hash_links` deletes the link row."""
+        with database.session() as session:
+            algorithm = self._algorithm(session)
+            hash_row = ModelHashRow(algorithm_name=algorithm.name, value="a")
+            model = ModelRow(program="p", method="m")
+            model.hash_links.append(ModelHashLink(hash=hash_row))
+            session.add(model)
+            session.commit()
+
+            model.hash_links.clear()
+            session.commit()
+
+            assert session.exec(select(ModelHashLink)).all() == []
+            assert session.exec(select(ModelHashRow)).all() == [hash_row]
 
 
 class TestLinkModels:
