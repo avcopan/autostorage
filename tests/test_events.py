@@ -30,6 +30,7 @@ from autostorage.models import (
     GeometryTrajectoryLink,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashLink,
     ModelHashRow,
     ModelRow,
     PropertyKindRow,
@@ -47,6 +48,7 @@ NDIM_3 = 3
 EXPECTED_IDENTITY_COUNT = 4
 NATOMS_THREE = 3
 NATOMS_TWO = 2
+N_BUILTIN_HASHES = 2  # minimal@1 and exact@1
 
 
 @pytest.fixture
@@ -1649,6 +1651,24 @@ def failing_hash_database(db_path: Path) -> Generator[Database]:
             yield db
 
 
+def _orca_hash_fn(
+    program: str,
+    method: str,
+    basis: str | None,  # noqa: ARG001
+    keywords: Any,  # noqa: ANN401, ARG001
+) -> str:
+    """Hash function for ORCA models."""
+    return f"{program}:{method}"
+
+
+@pytest.fixture
+def orca_database(db_path: Path) -> Generator[Database]:
+    """A database opened with an ORCA-only model hash algorithm registered."""
+    for _ in _registered("orca_test@1", _orca_hash_fn, programs={"orca"}):
+        with Database(db_path) as db:
+            yield db
+
+
 @pytest.fixture
 def empty_hash_database(db_path: Path) -> Generator[Database]:
     """A database opened with an empty-valued model hash algorithm registered."""
@@ -1689,7 +1709,7 @@ class TestModelHashes:
             session.add(model)
             session.commit()
 
-            assert len(model.hash_links) == NATOMS_TWO  # one per built-in
+            assert len(model.hash_links) == N_BUILTIN_HASHES
             hashes = _hash_values(model)
             assert set(hashes) == {"minimal@1", "exact@1"}
             assert hashes["minimal@1"] == "b3lyp/6-31g*"
@@ -1765,3 +1785,82 @@ class TestModelHashes:
                 session.flush()
 
             assert set(_hash_values(model)) == {"minimal@1", "exact@1"}
+
+    def test_edit_keywords_rehashes(self, database: Database) -> None:
+        """Reassigning or extending keywords replaces exact@1 and keeps minimal@1."""
+        with database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp", keywords={"a": 1})
+            session.add(model)
+            session.commit()
+            links = {
+                link.hash.algorithm_name: link.hash_id for link in model.hash_links
+            }
+            old_exact = _hash_values(model)["exact@1"]
+
+            model.keywords = {"a": 2}  # reassigned
+            session.commit()
+            reassigned = _hash_values(model)["exact@1"]
+            assert reassigned != old_exact
+
+            model.keywords["b"] = 3  # top-level key added in place
+            session.commit()
+            added = _hash_values(model)["exact@1"]
+            assert added not in {old_exact, reassigned}
+
+            new_links = {
+                link.hash.algorithm_name: link.hash_id for link in model.hash_links
+            }
+            assert len(model.hash_links) == N_BUILTIN_HASHES
+            assert new_links["minimal@1"] == links["minimal@1"]
+            assert new_links["exact@1"] != links["exact@1"]
+            # The old exact@1 row stays in the table
+            assert len(_hash_rows(session, "exact@1")) == NDIM_3
+
+    def test_edit_method_rehashes(self, database: Database) -> None:
+        """Changing the method replaces the minimal@1 link."""
+        with database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp", basis="def2-svp")
+            session.add(model)
+            session.commit()
+
+            model.method = "pbe0"
+            session.commit()
+
+            assert _hash_values(model)["minimal@1"] == "pbe0/def2-svp"
+
+    def test_unrelated_edit_keeps_links(self, database: Database) -> None:
+        """Editing `program_version` doesn't touch the hash links."""
+        with database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp")
+            session.add(model)
+            session.commit()
+            before = {link.hash_id for link in model.hash_links}
+
+            model.program_version = "6.1"
+            session.commit()
+
+            assert {link.hash_id for link in model.hash_links} == before
+
+    def test_program_restricted_algorithm(self, orca_database: Database) -> None:
+        """A program-restricted algorithm links models of that program only."""
+        with orca_database.session() as session:
+            orca = ModelRow(program="ORCA", method="b3lyp")
+            psi4 = ModelRow(program="psi4", method="b3lyp")
+            session.add_all([orca, psi4])
+            session.commit()
+
+            assert _hash_values(orca)["orca_test@1"] == "ORCA:b3lyp"
+            assert "orca_test@1" not in _hash_values(psi4)
+
+    def test_delete_model_keeps_hash_rows(self, database: Database) -> None:
+        """Deleting a model removes its links and leaves the hash rows."""
+        with database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp")
+            session.add(model)
+            session.commit()
+
+            session.delete(model)
+            session.commit()
+
+            assert session.exec(select(ModelHashLink)).all() == []
+            assert len(session.exec(select(ModelHashRow)).all()) == N_BUILTIN_HASHES

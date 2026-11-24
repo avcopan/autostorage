@@ -745,6 +745,17 @@ def _attach_model_hashes(ctx: _ModelHashFlushContext, row: ModelRow) -> None:
             row.hash_links.append(ModelHashLink(hash=hash_row))
 
 
+def _model_hash_inputs_changed(row: ModelRow) -> bool:
+    """Return whether the program, method, basis or keywords of a model changed."""
+    state = inspect(row)
+    if state is None:
+        return False
+    return any(
+        state.attrs[name].history.has_changes()
+        for name in ("program", "method", "basis", "keywords")
+    )
+
+
 @event.listens_for(AutostorageSession, "before_flush")
 def add_model_hashes_before_flush(
     session: Session,
@@ -754,12 +765,21 @@ def add_model_hashes_before_flush(
     """Attach registry model hashes to new models.
 
     Generates and attaches a `ModelHashRow` for every registered algorithm that
-    applies to the model's program (e.g. `minimal@1`, `exact@1`).
+    applies to the model's program (e.g. `minimal@1`, `exact@1`). Hashes of
+    persisted models are regenerated if their program, method, basis or
+    keywords change.
     """
     new = [obj for obj in session.new if isinstance(obj, ModelRow)]
-    if not new:
+    changed = [
+        obj
+        for obj in session.dirty
+        if isinstance(obj, ModelRow) and _model_hash_inputs_changed(obj)
+    ]
+    if not new and not changed:
         return
 
     ctx = _ModelHashFlushContext(session=session)
-    for row in new:
+    for row in changed:
+        row.hash_links.clear()
+    for row in new + changed:
         _attach_model_hashes(ctx, row)
