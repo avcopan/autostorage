@@ -13,14 +13,24 @@ from autogeom import ureg
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from autostorage import IdentityGenerationWarning, StationaryOrderWarning
+from autostorage import (
+    IdentityGenerationWarning,
+    ModelHashAlgorithm,
+    ModelHashAlgorithmRegistry,
+    ModelHashGenerationWarning,
+    ModelHashKind,
+    ModelHashProtocol,
+    StationaryOrderWarning,
+)
 from autostorage.database import Database
+from autostorage.events import MAX_MODEL_HASH_LENGTH
 from autostorage.models import (
     CalculationRow,
     GeometryRow,
     GeometryTrajectoryLink,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashRow,
     ModelRow,
     PropertyKindRow,
     PropertyValueRow,
@@ -1584,3 +1594,174 @@ class TestPersistedSiblingIdentities:
             session.commit()
 
             assert _identity_for_algorithm(stp2, "rdkit_smiles").value == "[H]O[H]"
+
+
+def _failing_hash_fn(
+    program: str,  # noqa: ARG001
+    method: str,  # noqa: ARG001
+    basis: str | None,  # noqa: ARG001
+    keywords: Any,  # noqa: ANN401, ARG001
+) -> str:
+    """Hash function that always raises."""
+    msg = "cannot hash"
+    raise ValueError(msg)
+
+
+def _empty_hash_fn(
+    program: str,  # noqa: ARG001
+    method: str,  # noqa: ARG001
+    basis: str | None,  # noqa: ARG001
+    keywords: Any,  # noqa: ANN401, ARG001
+) -> str:
+    """Hash function that returns an empty string."""
+    return ""
+
+
+def _long_hash_fn(
+    program: str,  # noqa: ARG001
+    method: str,  # noqa: ARG001
+    basis: str | None,  # noqa: ARG001
+    keywords: Any,  # noqa: ANN401, ARG001
+) -> str:
+    """Hash function that returns a value at the length limit."""
+    return "x" * MAX_MODEL_HASH_LENGTH
+
+
+def _registered(
+    name: str,
+    hash_fn: ModelHashProtocol,
+    programs: set[str] | None = None,
+) -> Generator[ModelHashAlgorithm]:
+    """Register a test algorithm, and remove it from the registry afterwards."""
+    algorithm = ModelHashAlgorithmRegistry.register(
+        name, ModelHashKind.FINE, hash_fn, programs=programs
+    )
+    yield algorithm
+    ModelHashAlgorithmRegistry.algorithms.remove(algorithm)
+
+
+@pytest.fixture
+def failing_hash_database(db_path: Path) -> Generator[Database]:
+    """A database opened with an always-failing model hash algorithm registered."""
+    # Registered before the database opens, so that the algorithm is seeded
+    for _ in _registered("failing_test@1", _failing_hash_fn):
+        with Database(db_path) as db:
+            yield db
+
+
+@pytest.fixture
+def empty_hash_database(db_path: Path) -> Generator[Database]:
+    """A database opened with an empty-valued model hash algorithm registered."""
+    for _ in _registered("empty_test@1", _empty_hash_fn):
+        with Database(db_path) as db:
+            yield db
+
+
+@pytest.fixture
+def long_hash_database(db_path: Path) -> Generator[Database]:
+    """A database opened with a too-long-valued model hash algorithm registered."""
+    for _ in _registered("long_test@1", _long_hash_fn):
+        with Database(db_path) as db:
+            yield db
+
+
+def _hash_values(model: ModelRow) -> dict[str | None, str]:
+    """Return the model's hash values keyed by algorithm name."""
+    return {link.hash.algorithm_name: link.hash.value for link in model.hash_links}
+
+
+def _hash_rows(session: Session, algorithm_name: str) -> list[ModelHashRow]:
+    """Return every stored hash row of an algorithm."""
+    return list(
+        session.exec(
+            select(ModelHashRow).where(ModelHashRow.algorithm_name == algorithm_name)
+        )
+    )
+
+
+class TestModelHashes:
+    """Models get hashes from the registered algorithms on flush."""
+
+    def test_new_model_gets_builtin_hashes(self, database: Database) -> None:
+        """A new model is linked to one hash per built-in algorithm."""
+        with database.session() as session:
+            model = ModelRow(program="ORCA", method="B3LYP", basis="6-31G*")
+            session.add(model)
+            session.commit()
+
+            assert len(model.hash_links) == NATOMS_TWO  # one per built-in
+            hashes = _hash_values(model)
+            assert set(hashes) == {"minimal@1", "exact@1"}
+            assert hashes["minimal@1"] == "b3lyp/6-31g*"
+            assert len(hashes["exact@1"]) == 64
+
+    def test_same_method_different_keywords(self, database: Database) -> None:
+        """Models differing in keywords share minimal@1 but not exact@1."""
+        with database.session() as session:
+            models = [
+                ModelRow(program="orca", method="b3lyp", keywords={"a": 1}),
+                ModelRow(program="orca", method="b3lyp", keywords={"a": 2}),
+            ]
+            session.add_all(models)
+            session.commit()
+
+            assert len(_hash_rows(session, "minimal@1")) == 1
+            assert len(_hash_rows(session, "exact@1")) == NDIM_2  # one per model
+            assert (
+                _hash_values(models[0])["minimal@1"]
+                == _hash_values(models[1])["minimal@1"]
+            )
+
+    def test_identical_models_share_hash_rows(self, database: Database) -> None:
+        """Identical models are stored twice and share their hash rows."""
+        with database.session() as session:
+            first = ModelRow(program="orca", method="b3lyp", keywords={"a": 1})
+            second = ModelRow(program="orca", method="b3lyp", keywords={"a": 1})
+            # Same flush: the per-flush cache's job
+            session.add_all([first, second])
+            session.commit()
+            third = ModelRow(program="orca", method="b3lyp", keywords={"a": 1})
+            # Later flush: found in the database
+            session.add(third)
+            session.commit()
+
+            assert len(session.exec(select(ModelRow)).all()) == NDIM_3
+            assert len(_hash_rows(session, "minimal@1")) == 1
+            assert len(_hash_rows(session, "exact@1")) == 1
+            ids = {
+                frozenset(link.hash_id for link in m.hash_links)
+                for m in (first, second, third)
+            }
+            assert len(ids) == 1
+
+    def test_failing_hash_warns(self, failing_hash_database: Database) -> None:
+        """A hash function that raises is skipped with a warning; the rest attach."""
+        with failing_hash_database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp")
+            session.add(model)
+            with pytest.warns(
+                ModelHashGenerationWarning, match=r"failing_test@1.*ValueError"
+            ):
+                session.flush()
+
+            assert set(_hash_values(model)) == {"minimal@1", "exact@1"}
+
+    def test_empty_hash_skipped(self, empty_hash_database: Database) -> None:
+        """An empty hash value is skipped with a warning."""
+        with empty_hash_database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp")
+            session.add(model)
+            with pytest.warns(ModelHashGenerationWarning, match="empty hash"):
+                session.flush()
+
+            assert "empty_test@1" not in _hash_values(model)
+
+    def test_long_hash_skipped(self, long_hash_database: Database) -> None:
+        """A hash value at the length limit is skipped with a warning."""
+        with long_hash_database.session() as session:
+            model = ModelRow(program="orca", method="b3lyp")
+            session.add(model)
+            with pytest.warns(ModelHashGenerationWarning, match="255 characters"):
+                session.flush()
+
+            assert set(_hash_values(model)) == {"minimal@1", "exact@1"}

@@ -1115,7 +1115,7 @@ class TestModelHashRow:
             session.commit()
 
             assert session.exec(select(ModelHashLink)).all() == []
-            assert session.exec(select(ModelHashRow)).all() == [hash_row]
+            assert hash_row in session.exec(select(ModelHashRow)).all()
 
     def test_removing_hash_link_deletes_it(self, database: Database) -> None:
         """Removing a link from `ModelRow.hash_links` deletes the link row."""
@@ -1131,7 +1131,7 @@ class TestModelHashRow:
             session.commit()
 
             assert session.exec(select(ModelHashLink)).all() == []
-            assert session.exec(select(ModelHashRow)).all() == [hash_row]
+            assert hash_row in session.exec(select(ModelHashRow)).all()
 
 
 class TestLinkModels:

@@ -82,8 +82,9 @@ class ModelHashAlgorithmRegistry:
         Register algorithms before opening a `Database`, which mirrors them into
         its `model_hash_algorithm` table. The foreign key to that table is
         enforced, so a model hashed by an unseeded algorithm fails on flush.
-        Hash values must be under 255 characters; a function that would return
-        a longer value should hash it itself.
+        Hash values must be under 255 characters (longer ones are skipped with a
+        warning); a function that would return a longer value should hash it
+        itself.
 
         Args:
             name: Unique algorithm name.

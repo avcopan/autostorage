@@ -8,6 +8,7 @@ from .domain import Calculation, Model
 from .events import (
     AutostorageSession,
     IdentityGenerationWarning,
+    ModelHashGenerationWarning,
     StationaryOrderWarning,
 )
 from .identity import (
@@ -83,6 +84,7 @@ __all__ = [
     "ModelHashAlgorithm",
     "ModelHashAlgorithmRegistry",
     "ModelHashAlgorithmRow",
+    "ModelHashGenerationWarning",
     "ModelHashKind",
     "ModelHashLink",
     "ModelHashProtocol",
