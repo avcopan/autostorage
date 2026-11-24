@@ -940,7 +940,9 @@ class StepRow(SQLModel, table=True):
         UniqueConstraint(
             "stage_id1", "stage_id2", "stage_id_ts", name="unq_step_stages"
         ),
-        CheckConstraint("stage_id1 < stage_id2", name="chk_stage_order"),
+        # `<=`, not `<`: equal stages allow self-reactions, e.g. a conformational TS
+        # whose two sides are the same stored point (as in RGD1)
+        CheckConstraint("stage_id1 <= stage_id2", name="chk_stage_order"),
         # `unq_step_stages` doesn't catch duplicate barrierless steps (stage_id_ts
         # NULL), since SQL never treats NULL as equal to itself in a unique
         # constraint. This expression index closes that gap at the DB level.

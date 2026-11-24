@@ -172,7 +172,7 @@ def sort_step_stage_ids(
     connection: Connection,  # noqa: ARG001
     target: StepRow,
 ) -> None:
-    """Auto-sort stage_id1 and stage_id2 so stage_id1 < stage_id2."""
+    """Auto-sort stage_id1 and stage_id2 so stage_id1 <= stage_id2."""
     if (
         target.stage_id1 is not None
         and target.stage_id2 is not None

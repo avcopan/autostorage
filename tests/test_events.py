@@ -414,17 +414,16 @@ class TestSortStepStageIds:
             session.add(stage)
             session.flush()
 
-            # Create step with equal IDs (will fail constraint but that's OK)
+            # Equal IDs are allowed: a self-reaction
             step = StepRow(
                 stage_id1=stage.id,
                 stage_id2=stage.id,
                 is_barrierless=True,
             )
             session.add(step)
+            session.commit()
 
-            # The constraint check happens during commit
-            with pytest.raises(IntegrityError):
-                session.commit()
+            assert step.stage_id1 == step.stage_id2 == stage.id
 
     def test_sorting_three_stage_ids(
         self, make_stage: Callable[..., StageRow], database: Database
@@ -615,6 +614,21 @@ class TestVerifyStepBalance:
             )
             session.add(step)
             session.commit()
+
+    def test_self_reaction_step(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A -> A through a TS (both sides one stage) flushes and balances."""
+        with database.session() as session:
+            stage = StageRow.from_points([make_point()])
+            step = StepRow(
+                stage1=stage,
+                stage2=stage,
+                stage_ts=StageRow.from_points([make_point(order=1)], is_ts=True),
+            )
+            session.add(step)
+            session.commit()
+            assert step.stage_id1 == step.stage_id2 == stage.id
 
     def test_counts_are_weighted(
         self, make_point: Callable[..., StationaryPointRow], database: Database
