@@ -122,7 +122,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ipython_pygments_lexers-1.1.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jedi-0.20.1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-11.2.1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.7-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/packaging-26.3-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/parso-0.8.7-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pexpect-4.9.0-pyhd8ed1ab_1.conda
@@ -149,8 +151,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing-inspection-0.4.5-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.3-pyh4616a5c_0.conda
-      - conda_source: autostorage[b15de0c7] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.5-pyh4616a5c_0.conda
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/protomol-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[f0e01628] @ .
   dev:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -347,8 +350,10 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/markdown-it-py-4.2.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/mdurl-0.1.2-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-11.2.1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/nest-asyncio2-1.7.4-pyh5ded981_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.7-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/opentelemetry-api-1.45.2-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/opentelemetry-exporter-http-transport-0.66b1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/opentelemetry-exporter-otlp-common-0.66b1-pyh5ded981_0.conda
@@ -413,8 +418,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/uvicorn-0.54.0-pyh53cf698_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/uvicorn-standard-0.54.0-h6c8c7fd_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-4.1.2-pyh5ded981_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.3-pyh4616a5c_0.conda
-      - conda_source: autostorage[b15de0c7] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.5-pyh4616a5c_0.conda
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/protomol-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[f0e01628] @ .
       - pypi: https://files.pythonhosted.org/packages/07/6c/aa3f2f849e01cb6a001cd8554a88d4c77c5c1a31c95bdf1cf9301e6d9ef4/defusedxml-0.7.1-py2.py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/15/d5/a8f9149b97cced9e1f4bff92ff0b6206120e2c853ae774d7020d6ecd8fa8/fqdn-1.6.0-py3-none-any.whl
       - pypi: https://files.pythonhosted.org/packages/1a/69/ee613f74085ca7103f79cd08d579c4f3177d1d26e5d3d9528d2d6536a707/nbformat-5.11.1-py3-none-any.whl
@@ -595,7 +601,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ipython_pygments_lexers-1.1.1-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jedi-0.20.1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.2.2-pyhd8ed1ab_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-11.2.1-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.7-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/packaging-26.3-pyhc364b38_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/parso-0.8.7-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/pexpect-4.9.0-pyhd8ed1ab_1.conda
@@ -626,8 +634,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing-inspection-0.4.5-pyh5ded981_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.16.0-pyhcf101f3_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026e-h5d301ff_0.conda
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.3-pyh4616a5c_0.conda
-      - conda_source: autostorage[b15de0c7] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.5-pyh4616a5c_0.conda
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/protomol-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[f0e01628] @ .
   test-lowest:
     channels:
     - url: https://conda.anaconda.org/conda-forge/
@@ -746,7 +755,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/ipython_genutils-0.2.0-pyhd8ed1ab_2.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/jedi-0.18.1-pyhd8ed1ab_2.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/matplotlib-inline-0.1.1-pyhd8ed1ab_1.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-8.0.0-py_0.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.0.12-py_0.tar.bz2
+      - conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.5-pyhe01879c_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/packaging-22.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/parso-0.8.0-py_1.tar.bz2
       - conda: https://conda.anaconda.org/conda-forge/noarch/pexpect-4.8.0-pyh1a96a4e_2.tar.bz2
@@ -778,8 +789,9 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.12.2-pyha770c72_1.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/tzdata-2026c-h151e31d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/noarch/wcwidth-0.1.7-py_1.tar.bz2
-      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.3-pyh4616a5c_0.conda
-      - conda_source: autostorage[b15de0c7] @ .
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.5-pyh4616a5c_0.conda
+      - conda: https://repo.prefix.dev/avcopan/automech/noarch/protomol-0.0.2-pyh4616a5c_0.conda
+      - conda_source: autostorage[f0e01628] @ .
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2
   sha256: fe51de6107f9edc7aa4f786a70f4a883943bc9d39b3bb7307c04c41410990726
@@ -4653,7 +4665,7 @@ packages:
   license: BSD-3-Clause
   license_family: BSD
   purls:
-  - pkg:pypi/flexparser?source=hash-mapping
+  - pkg:pypi/flexparser?source=compressed-mapping
   run_exports: {}
   size: 30745
   timestamp: 1788605800152
@@ -5226,6 +5238,29 @@ packages:
   run_exports: {}
   size: 14465
   timestamp: 1733255681319
+- conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-11.2.1-pyh5ded981_0.conda
+  sha256: eac70c03e56f47de5003a76b74f55f8c7e6ed721ca71cc7e5ad5fd231cc5257a
+  md5: c927a046b5b46ae73c42c82869e9d4b1
+  depends:
+  - python >=3.11
+  - python
+  license: MIT
+  license_family: MIT
+  purls:
+  - pkg:pypi/more-itertools?source=hash-mapping
+  run_exports: {}
+  size: 73182
+  timestamp: 1792042780319
+- conda: https://conda.anaconda.org/conda-forge/noarch/more-itertools-8.0.0-py_0.tar.bz2
+  sha256: 982fccc7b3dab8f11affabb9a7002f407e7e491a577088f23086446497f2a30c
+  md5: b03a0d6f3b307cb39096271b4dbeaa4b
+  depends:
+  - python >=3.4
+  license: MIT
+  license_family: MIT
+  run_exports: {}
+  size: 33714
+  timestamp: 1575378697149
 - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.0.12-py_0.tar.bz2
   sha256: 7a9c6667691691ca3e9a972966f10365d0a8a8f0c9c5271838bb534ce79c258e
   md5: bdbf1f57f8b9a5f88d65ffba18391aa3
@@ -5260,6 +5295,40 @@ packages:
   run_exports: {}
   size: 16323
   timestamp: 1793096318209
+- conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.5-pyhe01879c_0.conda
+  sha256: 02019191a2597865940394ff42418b37bc585a03a1c643d7cea9981774de2128
+  md5: 16bff3d37a4f99e3aa089c36c2b8d650
+  depends:
+  - python >=3.11
+  - python
+  constrains:
+  - numpy >=1.25
+  - scipy >=1.11.2
+  - matplotlib >=3.8
+  - pandas >=2.0
+  license: BSD-3-Clause
+  license_family: BSD
+  run_exports: {}
+  size: 1564462
+  timestamp: 1749078300258
+- conda: https://conda.anaconda.org/conda-forge/noarch/networkx-3.7-pyhc364b38_0.conda
+  sha256: 9458e13767779d5db48c035ba27a1af843fde5187d34c17b60076e18835e8637
+  md5: ddc679d85e7c9c3738efd303b6580c69
+  depends:
+  - python >=3.12
+  - python
+  constrains:
+  - numpy >=1.25
+  - scipy >=1.11.2
+  - matplotlib-base >=3.8
+  - pandas >=2.0
+  license: BSD-3-Clause
+  license_family: BSD
+  purls:
+  - pkg:pypi/networkx?source=compressed-mapping
+  run_exports: {}
+  size: 1642541
+  timestamp: 1790068597221
 - conda: https://conda.anaconda.org/conda-forge/noarch/opentelemetry-api-1.45.2-pyhd8ed1ab_0.conda
   sha256: 5e2d9ebc38511c3236e995a059e66311e87e64d8095c5c10573a5f1b48b66512
   md5: 476cee746329615400bf0f7d681630e9
@@ -5935,7 +6004,7 @@ packages:
   license: Apache-2.0
   license_family: APACHE
   purls:
-  - pkg:pypi/python-multipart?source=compressed-mapping
+  - pkg:pypi/python-multipart?source=hash-mapping
   run_exports: {}
   size: 40033
   timestamp: 1793464843791
@@ -6072,7 +6141,7 @@ packages:
   license: MIT
   license_family: MIT
   purls:
-  - pkg:pypi/rich-toolkit?source=compressed-mapping
+  - pkg:pypi/rich-toolkit?source=hash-mapping
   run_exports: {}
   size: 37377
   timestamp: 1791458547400
@@ -6329,7 +6398,7 @@ packages:
   license: MIT
   license_family: MIT
   purls:
-  - pkg:pypi/truststore?source=compressed-mapping
+  - pkg:pypi/truststore?source=hash-mapping
   run_exports: {}
   size: 24467
   timestamp: 1791873594717
@@ -6510,9 +6579,9 @@ packages:
   run_exports: {}
   size: 24791
   timestamp: 1792622774790
-- conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.3-pyh4616a5c_0.conda
-  sha256: d8144fab385b7ec4115d13797cee8939d157019c182b7274af93a9de78892616
-  md5: 161f24a870443856cffa600f28f8f330
+- conda: https://repo.prefix.dev/avcopan/automech/noarch/autogeom-0.0.5-pyh4616a5c_0.conda
+  sha256: b4fc6d41ef82ead5197bd37f43b82d79864da39074cdd8de66a699b27a9ef371
+  md5: 5c29a452a7912049f6fd6a0ad5a10996
   depends:
   - python >=3.13
   - python *
@@ -6525,14 +6594,32 @@ packages:
   - scipy >=1.15
   license: MIT
   run_exports: {}
-  size: 32311
-  timestamp: 1794939079059
-- conda_source: autostorage[b15de0c7] @ .
+  size: 33324
+  timestamp: 1795541302510
+- conda: https://repo.prefix.dev/avcopan/automech/noarch/protomol-0.0.2-pyh4616a5c_0.conda
+  sha256: 027c033f7a9e5dcecbb8f7f98fd60825445038993c89585b79073c071a9354e3
+  md5: be4f68503ca57e19fe4556a90b98243b
+  depends:
+  - python >=3.13
+  - python *
+  - autogeom >=0.0.5
+  - more-itertools >=8
+  - networkx >=3.5
+  - numpy >=2.2
+  - pydantic >=2.10
+  - rdkit >=2024.9.1
+  - typing_extensions >=4.12
+  license: MIT
+  run_exports: {}
+  size: 90167
+  timestamp: 1795542285225
+- conda_source: autostorage[f0e01628] @ .
   variants:
     target_platform: noarch
   depends:
   - autogeom >=0.0.3
   - pint >=0.24
+  - protomol >=0.0.2
   - pydantic >=2.10.1
   - python *
   - python >=3.13

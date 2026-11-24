@@ -11,6 +11,7 @@ authors = [
 dependencies = [
     "autogeom>=0.0.3",
     "pint>=0.24",
+    "protomol>=0.0.2",
     # 2.10.0 breaks `default_factory` in SQLModel table rows (fixed in 2.10.1)
     "pydantic>=2.10.1",
     "sqlmodel>=0.0.31",

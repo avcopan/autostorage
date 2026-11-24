@@ -14,6 +14,7 @@ from .models import (
     ModelHashRow,
     ModelRow,
     StationaryPointRow,
+    identity_value_hash,
 )
 
 __all__ = ["model_by_hash", "stationary_point_by_identity"]
@@ -49,7 +50,7 @@ def stationary_point_by_identity(
             onclause=col(IdentityRow.id) == col(IdentityStationaryLink.identity_id),
         )
         .where(
-            col(IdentityRow.value) == value,
+            col(IdentityRow.value_hash) == identity_value_hash(value),
             col(IdentityRow.algorithm_name) == name,
         )
     )

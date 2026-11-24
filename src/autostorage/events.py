@@ -7,7 +7,7 @@ sessions in the same process.
 
 import warnings
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -19,12 +19,13 @@ from autogeom import (
     ureg,
     vibrational_analysis,
 )
+from protomol import AnyGraph, from_geometry
 from sqlalchemy import event, inspect
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper, UOWTransaction, aliased
 from sqlmodel import Session, col, select
 
-from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry
+from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry, IdentityResult
 from .model_hash import ModelHashAlgorithm, ModelHashAlgorithmRegistry
 from .models import (
     GeometryRow,
@@ -45,6 +46,7 @@ from .models import (
     TrajectoryAxisRow,
     TrajectoryRow,
     geometry_hash,
+    identity_value_hash,
     stage_hash,
 )
 from .property import PropertyKindRegistry, hessian_property_kind
@@ -68,7 +70,8 @@ class StationaryOrderWarning(UserWarning):
 
 
 # Errors that the built-in identity functions raise for unsupported or unperceivable
-# geometries (e.g. metals, no valid Lewis structure, failed InChI generation).
+# geometries (e.g. metals, no valid Lewis structure, failed InChI generation), and
+# that graph perception raises (`protomol.GraphError` is a `ValueError`).
 _IDENTITY_ERRORS = (GeometryConversionError, NotImplementedError, ValueError)
 
 # Errors that a model hash function raises for a model it can't hash (e.g.
@@ -105,6 +108,7 @@ def create_identity_algorithms(session: Session) -> None:
             session.add(row)
         row.kind = alg.kind
         row.parent_algorithm_name = parent_name
+        row.stores_graph = alg.stores_graph
     session.commit()
 
 
@@ -150,6 +154,17 @@ def set_geometry_hash(
     target.hash = geometry_hash(target)
 
 
+@event.listens_for(IdentityRow, "before_insert")
+@event.listens_for(IdentityRow, "before_update")
+def set_identity_value_hash(
+    mapper: Mapper[IdentityRow],  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: IdentityRow,
+) -> None:
+    """Set `value_hash`, which identities are unique and looked up by."""
+    target.value_hash = identity_value_hash(target.value)
+
+
 @event.listens_for(StepRow, "before_insert")
 @event.listens_for(StepRow, "before_update")
 def sort_step_stage_ids(
@@ -157,7 +172,7 @@ def sort_step_stage_ids(
     connection: Connection,  # noqa: ARG001
     target: StepRow,
 ) -> None:
-    """Auto-sort stage_id1 and stage_id2 so stage_id1 < stage_id2."""
+    """Auto-sort stage_id1 and stage_id2 so stage_id1 <= stage_id2."""
     if (
         target.stage_id1 is not None
         and target.stage_id2 is not None
@@ -210,7 +225,7 @@ def _link_stage(session: Session, link: StageStationaryLink) -> StageRow | None:
 
 
 def _link_point(
-    session: Session, link: StageStationaryLink
+    session: Session, link: StageStationaryLink | IdentityStationaryLink
 ) -> StationaryPointRow | None:
     """Return the stationary point of `link`, via its relationship or foreign key."""
     if link.stationary is not None:
@@ -743,7 +758,7 @@ def _get_or_create_identity(
         ident = ctx.session.exec(
             select(IdentityRow).where(
                 col(IdentityRow.algorithm_name) == algorithm_name,
-                col(IdentityRow.value) == value,
+                col(IdentityRow.value_hash) == identity_value_hash(value),
             )
         ).one_or_none()
     if ident is None:
@@ -793,26 +808,131 @@ def _sibling_geometries(
     return siblings
 
 
+def _is_permutation(atom_map: object, natoms: int) -> bool:
+    """Return whether `atom_map` lists the indices ``0..natoms-1`` in any order."""
+    if not isinstance(atom_map, (list, tuple)):
+        return False
+    if not all(isinstance(i, int) and not isinstance(i, bool) for i in atom_map):
+        return False
+    return sorted(atom_map) == list(range(natoms))
+
+
 def _generate_identity(
     algorithm: IdentityAlgorithm,
     geo_row: GeometryRow,
+    gra: AnyGraph | None,
     other_geos: dict[str, GeometryRow] | None,
-) -> str | None:
-    """Run `algorithm` on `geo_row`, warning and returning None on failure."""
+) -> IdentityResult | None:
+    """Run `algorithm` on `geo_row`, warning and returning None on failure.
+
+    An empty value, or an `atom_map` that isn't a permutation of the geometry's
+    atoms, also counts as a failure.
+    """
     try:
-        value = algorithm.identity_fn(geo_row, other_geos or None)
+        result = algorithm.identity_fn(geo_row, gra, other_geos or None)
     except _IDENTITY_ERRORS as err:
         reason = f"{type(err).__name__}: {err}"
     else:
-        if value:
-            return value
-        reason = "empty identity value."
+        if not isinstance(result, IdentityResult):
+            result = IdentityResult(result)
+        atom_map = result.atom_map
+        if not result.value:
+            reason = "empty identity value."
+        elif atom_map is not None and not _is_permutation(
+            list(atom_map), geo_row.atom_count
+        ):
+            reason = (
+                f"atom_map {list(atom_map)} is not a permutation of the "
+                f"{geo_row.atom_count} atoms."
+            )
+        else:
+            return result
     msg = f"Skipping {algorithm.name!r} identity for GeometryRow {geo_row.id}: {reason}"
     warnings.warn(msg, IdentityGenerationWarning, stacklevel=2)
     return None
 
 
-def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> None:
+type _GraphGetter = Callable[[IdentityAlgorithm], AnyGraph | None]
+"""Returns the graph to pass to a `uses_graph` algorithm, or None to skip it."""
+
+
+def _graph_getter(
+    obj: StationaryPointRow,
+    geo_row: GeometryRow,
+    stored: dict[str, AnyGraph],
+) -> _GraphGetter:
+    """Return the getter of the graph each `uses_graph` algorithm gets for `obj`.
+
+    The pending input graph, if any. Otherwise a stored graph, read before the
+    links were cleared: a `stores_graph` algorithm's own, else the preferred one
+    (the first of `stored`), kept only if the geometry has the same symbols in the
+    same order. Otherwise, a minimum's graph is perceived from its geometry (once,
+    warning on failure), and a saddle point skips the graph algorithms.
+    """
+    pending = obj.pending_graph
+    default = next(iter(stored.values()), None)
+    perceived: list[AnyGraph | None] = []
+
+    def _perceive() -> AnyGraph | None:
+        if not perceived:
+            try:
+                perceived.append(from_geometry(geo_row))
+            except _IDENTITY_ERRORS as err:
+                msg = (
+                    f"Skipping graph identities for GeometryRow {geo_row.id}: no "
+                    f"graph perceived ({type(err).__name__}: {err})."
+                )
+                warnings.warn(msg, IdentityGenerationWarning, stacklevel=5)
+                perceived.append(None)
+        return perceived[0]
+
+    def _get(algorithm: IdentityAlgorithm) -> AnyGraph | None:
+        if pending is not None:
+            return pending
+        gra = stored.get(algorithm.name, default)
+        if gra is not None and tuple(gra.symbols) == tuple(geo_row.symbols):
+            return gra
+        return _perceive() if obj.order == 0 else None
+
+    return _get
+
+
+def _kept_identity_keys(
+    ctx: _IdentityFlushContext, obj: StationaryPointRow
+) -> dict[str, _IdentityKey]:
+    """Return the keys of `obj`'s remaining identities, by algorithm, and cache them.
+
+    They serve as parent keys for the algorithms that are regenerated.
+    """
+    keys: dict[str, _IdentityKey] = {}
+    for link in obj.identity_links:
+        name = link.identity.algorithm_name
+        if name is not None:
+            keys[name] = (name, link.identity.value)
+            ctx.cache.setdefault(keys[name], link.identity)
+    return keys
+
+
+def _link_identity(
+    obj: StationaryPointRow, ident: IdentityRow, result: IdentityResult
+) -> None:
+    """Link `ident` to `obj`, with the result's atom map and cache, unless linked."""
+    if any(link.identity is ident for link in obj.identity_links):
+        return
+    atom_map = None if result.atom_map is None else list(result.atom_map)
+    link = IdentityStationaryLink(
+        identity=ident, atom_map=atom_map, algorithm_cache=result.cache
+    )
+    obj.identity_links.append(link)
+
+
+def _attach_identities(
+    ctx: _IdentityFlushContext,
+    obj: StationaryPointRow,
+    stored: dict[str, AnyGraph] | None = None,
+    *,
+    graph_only: bool = False,
+) -> None:
     """Generate and attach an identity for every registered algorithm to `obj`.
 
     Algorithms with a parent (e.g. SMILES, with InChI as parent) are passed
@@ -820,15 +940,26 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
     points sharing the parent identity. If an algorithm fails, a warning is
     issued and its identity is skipped. Algorithms that do not apply to
     stationary points of the given order are skipped.
+
+    Only algorithms that read the graph (`uses_graph`) are passed a graph (see
+    `_graph_getter`; `stored` holds the point's stored graphs from before its
+    links were cleared), the others get `None`. With `graph_only`, only the
+    `uses_graph` algorithms are run, and the other links are kept.
     """
     geo_row = _resolve_geometry(ctx.session, obj)
     if geo_row is None:
         # Without a geometry there is nothing to compute identities from
         return
 
-    keys: dict[str, _IdentityKey] = {}
+    get_graph = _graph_getter(obj, geo_row, stored or {})
+    keys = _kept_identity_keys(ctx, obj)
     for algorithm in ctx.algorithms:
         if not algorithm.applies_to(obj.order):
+            continue
+        if graph_only and not algorithm.uses_graph:
+            continue
+        gra = get_graph(algorithm) if algorithm.uses_graph else None
+        if algorithm.uses_graph and gra is None:
             continue
         name = algorithm.name
         parent = algorithm.parent
@@ -838,13 +969,12 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
         if parent_key is not None:
             other_geos = _sibling_geometries(ctx, obj, name, parent_key)
 
-        value = _generate_identity(algorithm, geo_row, other_geos)
-        if value is None:
+        result = _generate_identity(algorithm, geo_row, gra, other_geos)
+        if result is None:
             continue
 
-        ident = _get_or_create_identity(ctx, name, value)
-        if all(link.identity is not ident for link in obj.identity_links):
-            obj.identity_links.append(IdentityStationaryLink(identity=ident))
+        value = result.value
+        _link_identity(obj, _get_or_create_identity(ctx, name, value), result)
         keys[name] = (name, value)
         if parent_key is not None:
             pending = ctx.pending_siblings.setdefault((parent_key, name), {})
@@ -872,22 +1002,86 @@ def add_registry_identities_before_flush(
 
     Generates and attaches an `IdentityRow` for every registered algorithm (e.g.
     InChI, SMILES, Hill formula). Identities of persisted stationary points are
-    regenerated if their geometry or order changes.
+    regenerated if their geometry or order changes, with the graph read back from
+    their links. A persisted point given a new graph, and nothing else, has only
+    its `uses_graph` identities regenerated.
     """
     new = [obj for obj in session.new if isinstance(obj, StationaryPointRow)]
-    changed = [
-        obj
-        for obj in session.dirty
-        if isinstance(obj, StationaryPointRow) and _identity_inputs_changed(obj)
+    dirty = [obj for obj in session.dirty if isinstance(obj, StationaryPointRow)]
+    changed = [obj for obj in dirty if _identity_inputs_changed(obj)]
+    regraphed = [
+        obj for obj in dirty if obj not in changed and obj.pending_graph is not None
     ]
-    if not new and not changed:
+    if not new and not changed and not regraphed:
         return
 
     ctx = _IdentityFlushContext(session=session)
+    graph_names = {a.name for a in ctx.algorithms if a.uses_graph}
+    # Read the stored graphs before the links are cleared
+    stored = {id(obj): obj.stored_graphs() for obj in changed}
     for obj in changed:
         obj.identity_links.clear()
-    for obj in new + changed:
+    for obj in regraphed:
+        for link in list(obj.identity_links):
+            if link.identity.algorithm_name in graph_names:
+                obj.identity_links.remove(link)
+    for obj in new:
         _attach_identities(ctx, obj)
+    for obj in changed:
+        _attach_identities(ctx, obj, stored[id(obj)])
+    for obj in regraphed:
+        _attach_identities(ctx, obj, graph_only=True)
+
+
+@event.listens_for(AutostorageSession, "after_flush")
+def clear_pending_graphs_after_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+) -> None:
+    """Clear the input graphs that this flush consumed (a failed flush keeps them)."""
+    for obj in (*session.new, *session.dirty):
+        if isinstance(obj, StationaryPointRow):
+            obj.clear_pending_graph()
+
+
+def _link_algorithm_name(session: Session, link: IdentityStationaryLink) -> str | None:
+    """Return the algorithm name of `link`'s identity, via relationship or key."""
+    ident = link.identity
+    if ident is None and link.identity_id is not None:
+        ident = session.get(IdentityRow, link.identity_id)
+    return None if ident is None else ident.algorithm_name
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_identity_atom_maps_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Check that a new or changed link's `atom_map` permutes its point's atoms.
+
+    Raises:
+        ValueError: If an `atom_map` isn't a permutation of the point geometry's
+            atom indices.
+    """
+    for link in _pending(session, IdentityStationaryLink):
+        if link.atom_map is None:
+            continue
+        if link not in session.new and not _has_changes(link, "atom_map"):
+            continue
+        point = _link_point(session, link)
+        if point is None:
+            continue
+        geo_row = _resolve_geometry(session, point)
+        if geo_row is None or _is_permutation(link.atom_map, geo_row.atom_count):
+            continue
+        algorithm_name = _link_algorithm_name(session, link)
+        msg = (
+            f"atom_map {link.atom_map} of the {algorithm_name!r} identity of "
+            f"StationaryPointRow {point.id} is not a permutation of its "
+            f"{geo_row.atom_count} atoms."
+        )
+        raise ValueError(msg)
 
 
 @dataclass

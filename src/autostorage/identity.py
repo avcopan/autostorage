@@ -1,11 +1,13 @@
 """Identity algorithm registry with default definitions."""
 
-from collections.abc import Iterable, Mapping
-from typing import ClassVar, Protocol, Self, runtime_checkable
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import autogeom
+import protomol
 from autogeom import Geometry
-from pydantic import BaseModel, ConfigDict, model_validator
+from protomol import AnyGraph
 
 from .types import IdentityKind
 
@@ -14,7 +16,9 @@ __all__ = [
     "IdentityAlgorithmRegistry",
     "IdentityKind",
     "IdentityProtocol",
+    "IdentityResult",
     "hill_formula",
+    "protomol_graph",
     "rdkit_inchi",
     "rdkit_inchi_conn",
     "rdkit_smiles",
@@ -24,45 +28,95 @@ __all__ = [
 type OtherGeometries = Mapping[str, Geometry] | None
 
 
+@dataclass(frozen=True)
+class IdentityResult:
+    """An identity value with per-point data, returned by an identity function.
+
+    Attributes:
+        value: The identity value.
+        atom_map: ``atom_map[k]`` is the geometry index of canonical atom ``k``, for
+            an identity built from a canonical form. Stored on the point's link
+            and checked on flush to be a permutation of the geometry's atoms.
+        cache: Algorithm-specific data, stored in the link's `algorithm_cache`.
+    """
+
+    value: str
+    atom_map: Sequence[int] | None = None
+    cache: dict[str, Any] | None = None
+
+
 @runtime_checkable
 class IdentityProtocol(Protocol):
     """Protocol for identity functions."""
 
-    def __call__(self, geo: Geometry, other_geos: OtherGeometries = None) -> str:
-        """Generate the identity of `geo`, given peer geometries keyed by identity."""
+    def __call__(
+        self,
+        geo: Geometry,
+        gra: AnyGraph | None = None,
+        other_geos: OtherGeometries = None,
+    ) -> str | IdentityResult:
+        """Generate the identity of `geo`, given its graph and peer geometries.
+
+        `gra` is the protomol graph of `geo`, index-aligned with it, or `None`.
+        `other_geos` holds peer geometries keyed by their identity value. Return
+        the value, or an `IdentityResult` to also store an atom map or a cache.
+        """
         ...
 
 
-class IdentityAlgorithm(BaseModel):
+@dataclass(frozen=True)
+class IdentityAlgorithm:
     """A registered identity algorithm.
 
     Attributes:
         name: Unique algorithm name (mirrored into `IdentityAlgorithmRow`).
         kind: Category of identity produced.
-        identity_fn: ``(geo, other_geos=None) -> str``, generating the identity.
+        identity_fn: ``(geo, gra=None, other_geos=None) -> str | IdentityResult``,
+            generating the identity.
         parent: Algorithm whose identity selects the `other_geos` passed to
             `identity_fn`, if any.
         orders: Stationary point orders the algorithm applies to. `None` if it
             applies to any order.
+        uses_graph: Whether `identity_fn` reads `gra`. Such an algorithm is passed
+            the point's graph, perceived from the geometry for a minimum, and is
+            skipped for a saddle point without one.
+        stores_graph: Whether the value is the canonical graph (`protomol.to_json`)
+            and the result's `atom_map` maps it to the geometry, so that the
+            point's graph can be rebuilt from the link. Implies `uses_graph`.
     """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     name: str
     kind: IdentityKind
     identity_fn: IdentityProtocol
     parent: "IdentityAlgorithm | None" = None
     orders: frozenset[int] | None = None
+    uses_graph: bool = False
+    stores_graph: bool = False
 
     def applies_to(self, order: int) -> bool:
         """Check whether algorithm applies to a given order."""
         return self.orders is None or order in self.orders
 
-    @model_validator(mode="after")
-    def _check_parent_orders(self) -> Self:
-        """Requires the orders to be a subset of the parent's orders."""
+    def __post_init__(self) -> None:
+        """Check the function and that the orders are a subset of the parent's.
+
+        Raises:
+            TypeError: If `identity_fn` isn't callable.
+            ValueError: If the orders aren't a subset of the parent's orders, or
+                `stores_graph` is set without `uses_graph`.
+        """
+        if not callable(self.identity_fn):
+            msg = f"Identity function of {self.name!r} is not callable."
+            raise TypeError(msg)
+
+        if self.stores_graph and not self.uses_graph:
+            msg = (
+                f"Identity algorithm {self.name!r} stores a graph, so it must use one."
+            )
+            raise ValueError(msg)
+
         if self.parent is None or self.parent.orders is None:
-            return self
+            return
 
         if self.orders is None or not self.orders <= self.parent.orders:
             child = "all" if self.orders is None else sorted(self.orders)
@@ -74,8 +128,6 @@ class IdentityAlgorithm(BaseModel):
             )
             raise ValueError(msg)
 
-        return self
-
 
 class IdentityAlgorithmRegistry:
     """Central registry of all known identity algorithms."""
@@ -83,7 +135,7 @@ class IdentityAlgorithmRegistry:
     algorithms: ClassVar[list[IdentityAlgorithm]] = []
 
     @classmethod
-    def register(
+    def register(  # noqa: PLR0913
         cls,
         name: str,
         kind: IdentityKind,
@@ -91,6 +143,8 @@ class IdentityAlgorithmRegistry:
         *,
         parent: IdentityAlgorithm | None = None,
         orders: Iterable[int] | None = None,
+        uses_graph: bool = False,
+        stores_graph: bool = False,
     ) -> IdentityAlgorithm:
         """Create and register an identity algorithm.
 
@@ -106,6 +160,12 @@ class IdentityAlgorithmRegistry:
                 among the stationary points that share the parent identity.
             orders: Stationary point orders the algorithm applies to. `None` if it
                 applies to any order.
+            uses_graph: Whether `identity_fn` reads its `gra` argument. Graphs are
+                only perceived for points that such an algorithm applies to.
+            stores_graph: Whether `identity_fn` returns an `IdentityResult` whose
+                value is the canonical graph's JSON and whose `atom_map` maps it to
+                the geometry. The point's `graph` is read back from such a link.
+                Sets `uses_graph`.
 
         Raises:
             ValueError: If an algorithm named `name` is already registered, or
@@ -116,7 +176,13 @@ class IdentityAlgorithmRegistry:
             raise ValueError(msg)
         orders = None if orders is None else frozenset(orders)
         algorithm = IdentityAlgorithm(
-            name=name, kind=kind, identity_fn=identity_fn, parent=parent, orders=orders
+            name=name,
+            kind=kind,
+            identity_fn=identity_fn,
+            parent=parent,
+            orders=orders,
+            uses_graph=uses_graph or stores_graph,
+            stores_graph=stores_graph,
         )
         cls.algorithms.append(algorithm)
         return algorithm
@@ -138,6 +204,7 @@ class IdentityAlgorithmRegistry:
 
 def rdkit_inchi_conn_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate a connectivity InChI string with RDKit."""
@@ -155,6 +222,7 @@ rdkit_inchi_conn = IdentityAlgorithmRegistry.register(
 
 def rdkit_inchi_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate a standard InChI string with RDKit."""
@@ -170,7 +238,11 @@ rdkit_inchi = IdentityAlgorithmRegistry.register(
 """Standard InChI from RDKit (kind: stereoisomer; minima only)."""
 
 
-def rdkit_smiles_identity_fn(geo: Geometry, other_geos: OtherGeometries = None) -> str:
+def rdkit_smiles_identity_fn(
+    geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
+    other_geos: OtherGeometries = None,
+) -> str:
     """Generate a SMILES string with RDKit.
 
     If a geometry in `other_geos` has the same InChI, its SMILES key is returned,
@@ -200,6 +272,7 @@ The SMILES of an existing stationary point with the same InChI is reused.
 
 def hill_formula_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate the molecular formula in Hill order."""
@@ -212,3 +285,34 @@ hill_formula = IdentityAlgorithmRegistry.register(
     identity_fn=hill_formula_identity_fn,
 )
 """Molecular formula in Hill order (kind: formula)."""
+
+
+def protomol_graph_identity_fn(
+    geo: Geometry,  # noqa: ARG001
+    gra: AnyGraph | None = None,
+    other_geos: OtherGeometries = None,  # noqa: ARG001
+) -> IdentityResult:
+    """The canonical graph's JSON, with the atom map from it to the geometry.
+
+    Raises:
+        ValueError: If no graph is given.
+    """
+    if gra is None:
+        msg = "protomol_graph@0 needs a graph."
+        raise ValueError(msg)
+    canonical, atom_map = protomol.canonical_form(gra)  # ty: ignore[invalid-argument-type]
+    return IdentityResult(protomol.to_json(canonical), atom_map=atom_map)
+
+
+protomol_graph = IdentityAlgorithmRegistry.register(
+    name="protomol_graph@0",
+    kind=IdentityKind.GRAPH,
+    identity_fn=protomol_graph_identity_fn,
+    stores_graph=True,
+)
+"""The protomol graph as given, canonicalized (kind: graph; stores the graph).
+
+Interim: it stands in for the SMG schemes and is dropped once `smg_low_t@1` exists.
+An order-0 point without a graph gets one perceived from its geometry (one Lewis
+structure perception per point); a saddle point needs its reaction graph.
+"""

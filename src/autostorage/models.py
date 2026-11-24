@@ -12,7 +12,10 @@ import pint
 import py3Dmol
 from autogeom import Geometry, angle, dihedral, distance, ureg
 from autogeom.types import CoordinatesField
+from protomol import AnyGraph, from_json, relabel
+from sqlalchemy import inspect
 from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.orm.attributes import flag_dirty
 from sqlmodel import (
     JSON,
     CheckConstraint,
@@ -23,6 +26,7 @@ from sqlmodel import (
     Relationship,
     Session,
     SQLModel,
+    Text,
     UniqueConstraint,
     col,
     select,
@@ -76,6 +80,11 @@ def _json_dict_column() -> Column:
     return Column(MutableDict.as_mutable(JSON))
 
 
+def _compressed_json_dict_column() -> Column:
+    """Build a nullable zlib-compressed JSON column whose dict tracks key changes."""
+    return Column(MutableDict.as_mutable(CompressedJSONTypeDecorator()), nullable=True)
+
+
 def geometry_hash(geo: Geometry) -> str:
     """SHA-256 digest of a Geometry's symbols, coordinates, charge, and spin."""
     header = json.dumps([geo.symbols, geo.charge, geo.spin])
@@ -83,6 +92,11 @@ def geometry_hash(geo: Geometry) -> str:
     digest = hashlib.sha256(header.encode())
     digest.update(coords.tobytes())
     return digest.hexdigest()
+
+
+def identity_value_hash(value: str) -> str:
+    """SHA-256 hex digest of an identity value, which `IdentityRow`s are unique by."""
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def stage_hash(
@@ -233,15 +247,22 @@ class IdentityStationaryLink(SQLModel, table=True):
     """Foreign key to the linked `StationaryPointRow`."""
     identity_id: uuid.UUID | None = _link_fk_field("identity.id")
     """Foreign key to the linked `IdentityRow`."""
-    identity_cache: dict[str, Any] | None = Field(
-        default=None,
-        sa_column=Column(MutableDict.as_mutable(CompressedJSONTypeDecorator())),
+    algorithm_cache: dict[str, Any] | None = Field(
+        default=None, sa_column=_compressed_json_dict_column()
     )
-    """Data that makes generating identities cheaper (e.g. graph isomorphisms).
+    """Algorithm-specific data for this point's identity (e.g. graph automorphisms).
 
     Stored as zlib-compressed JSON. Only top-level key changes are tracked in
     place; reassign the dict after editing nested values. Discarded with the
     link when the stationary point's geometry changes.
+    """
+    atom_map: list[int] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    """``atom_map[k]`` is the geometry index of canonical atom ``k``, or `None`.
+
+    Set from an algorithm's `IdentityResult`. Checked on flush to be a permutation
+    of the point geometry's atoms.
     """
     stationary: "StationaryPointRow" = Relationship(back_populates="identity_links")
     """The linked `StationaryPointRow`."""
@@ -721,10 +742,15 @@ class StationaryPointRow(SQLModel, table=True):
         geometry: Geometry defining the coordinates of this point.
         calculation: Calculation that identified this point.
         identity_links: Link rows to this point's chemical identifiers (e.g. InChI,
-            SMILES), each with its `identity_cache`.
+            SMILES), each with its `algorithm_cache`.
         stage_links: Link rows to the stages this point belongs to, with counts.
         stages: Stages this point belongs to, each once. Read-only (reflects the
             stored links); write `stage_links`.
+        graph: The protomol graph of the point, index-aligned with its geometry.
+            The pending input if one was set, else the graph read back from the
+            point's preferred `stores_graph` identity link (see `stored_graphs`),
+            else `None`. Computed on each read. Setting it marks the row dirty, so
+            the next flush regenerates the graph identities from it.
     """
 
     __tablename__ = "stationary_point"
@@ -747,6 +773,61 @@ class StationaryPointRow(SQLModel, table=True):
     stages: list["StageRow"] = Relationship(
         link_model=StageStationaryLink, sa_relationship_kwargs={"viewonly": True}
     )
+
+    def __init__(self, *, graph: AnyGraph | None = None, **data: object) -> None:
+        """Create a stationary point, with an optional input `graph`."""
+        super().__init__(**data)
+        self.graph = graph
+
+    @property
+    def graph(self) -> AnyGraph | None:
+        """The pending input graph, else the stored one, else `None`."""
+        pending = self.pending_graph
+        if pending is not None:
+            return pending
+        return next(iter(self.stored_graphs().values()), None)
+
+    @graph.setter
+    def graph(self, value: AnyGraph | None) -> None:
+        info = inspect(self).info
+        if value is None:
+            info.pop("graph", None)
+            return
+        info["graph"] = value
+        flag_dirty(self)
+
+    @property
+    def pending_graph(self) -> AnyGraph | None:
+        """The graph set since the last flush, which the next flush consumes."""
+        return inspect(self).info.get("graph")
+
+    def clear_pending_graph(self) -> None:
+        """Drop the pending input graph (done after a successful flush)."""
+        inspect(self).info.pop("graph", None)
+
+    def stored_graphs(self) -> dict[str, AnyGraph]:
+        """The graphs rebuilt from this point's `stores_graph` links, by algorithm.
+
+        Each is the stored canonical graph relabelled by the inverse of the link's
+        `atom_map`, so it is index-aligned with the geometry. Ordered by preference:
+        by kind (`IdentityKind.graph_preference`: `low_t_stereoisomer`, then down
+        the ladder), then by algorithm name.
+        """
+        found: list[tuple[int, str, str, list[int]]] = []
+        for link in self.identity_links:
+            ident = link.identity
+            alg = None if ident is None else ident.algorithm
+            if alg is None or not alg.stores_graph or link.atom_map is None:
+                continue
+            preference = IdentityKind(alg.kind).graph_preference
+            found.append((preference, alg.name, ident.value, link.atom_map))
+        graphs: dict[str, AnyGraph] = {}
+        for _, name, value, atom_map in sorted(found, key=lambda t: t[:2]):
+            inverse = [0] * len(atom_map)  # inverse[geometry index] = canonical index
+            for k, i in enumerate(atom_map):
+                inverse[i] = k
+            graphs[name] = relabel(from_json(value), inverse)  # ty: ignore[invalid-argument-type]
+        return graphs
 
 
 # 3. Reaction network rows
@@ -859,7 +940,9 @@ class StepRow(SQLModel, table=True):
         UniqueConstraint(
             "stage_id1", "stage_id2", "stage_id_ts", name="unq_step_stages"
         ),
-        CheckConstraint("stage_id1 < stage_id2", name="chk_stage_order"),
+        # `<=`, not `<`: equal stages allow self-reactions, e.g. a conformational TS
+        # whose two sides are the same stored point (as in RGD1)
+        CheckConstraint("stage_id1 <= stage_id2", name="chk_stage_order"),
         # `unq_step_stages` doesn't catch duplicate barrierless steps (stage_id_ts
         # NULL), since SQL never treats NULL as equal to itself in a unique
         # constraint. This expression index closes that gap at the DB level.
@@ -910,6 +993,8 @@ class IdentityAlgorithmRow(SQLModel, table=True):
         kind: Category of identifier produced (e.g. ``stereoisomer``, ``formula``).
         parent_algorithm_name: Foreign key to the parent algorithm, whose identity
             disambiguates this one's `other_geos`, if any.
+        stores_graph: Whether the algorithm's value is the canonical graph, from
+            which the point's `graph` is rebuilt (see `IdentityAlgorithm`).
     """
 
     __tablename__ = "identity_algorithm"
@@ -920,6 +1005,7 @@ class IdentityAlgorithmRow(SQLModel, table=True):
     parent_algorithm_name: str | None = _fk_field(
         "identity_algorithm.name", nullable=True, index=False
     )
+    stores_graph: bool = False
 
     parent_algorithm: "IdentityAlgorithmRow" = Relationship(
         sa_relationship_kwargs={
@@ -939,18 +1025,26 @@ class IdentityRow(SQLModel, table=True):
         algorithm: Method used to generate the identifier (e.g. ``rdkit inchi``, ``rdkit
             smiles``); its ``kind`` gives the category (e.g. ``stereoisomer``,
             ``formula``).
-        value: The resulting identifier string.
+        value: The resulting identifier string (unindexed text).
+        value_hash: `identity_value_hash` of `value`, set on flush. Unique with
+            `algorithm_name`; look identities up by it, not by `value`.
+        algorithm_cache: Algorithm-specific data for this identity, stored as
+            zlib-compressed JSON. Reserved: nothing writes it yet.
         stationary_links: Link rows to the stationary points sharing this identity.
     """
 
     __tablename__ = "identity"
     __table_args__ = (
-        UniqueConstraint("algorithm_name", "value", name="unique_identity"),
+        UniqueConstraint("algorithm_name", "value_hash", name="unique_identity"),
     )
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     algorithm_name: str | None = _fk_field("identity_algorithm.name")
-    value: str
+    value: str = Field(sa_type=Text)
+    value_hash: str | None = Field(default=None, nullable=False)
+    algorithm_cache: dict[str, Any] | None = Field(
+        default=None, sa_column=_compressed_json_dict_column()
+    )
 
     algorithm: "IdentityAlgorithmRow" = Relationship(back_populates="identities")
     stationary_links: list["IdentityStationaryLink"] = Relationship(

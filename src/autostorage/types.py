@@ -11,6 +11,7 @@ from sqlalchemy import LargeBinary
 from sqlalchemy.types import TypeDecorator
 
 __all__ = [
+    "IDENTITY_KIND_LADDER",
     "AxisKind",
     "CompressedArrayTypeDecorator",
     "CompressedJSONTypeDecorator",
@@ -116,7 +117,51 @@ class IdentityKind(StrEnum):
     FORMULA = "formula"
     ISOMER = "isomer"
     STEREOISOMER = "stereoisomer"
+    LOW_T_STEREOISOMER = "low_t_stereoisomer"
+    """Stereoisomer under the low-temperature LS scheme (finer than `STEREOISOMER`)."""
     CONFORMER = "conformer"
+    GRAPH = "graph"
+    """A user-registered graph scheme; not on the coarse-to-fine ladder."""
+
+    @property
+    def rank(self) -> int | None:
+        """Position on the coarse-to-fine ladder (`formula` is 0), or None for `graph`.
+
+        Examples:
+            >>> IdentityKind.STEREOISOMER.rank, IdentityKind.GRAPH.rank
+            (2, None)
+        """
+        if self is IdentityKind.GRAPH:
+            return None
+        return IDENTITY_KIND_LADDER.index(self)
+
+    @property
+    def graph_preference(self) -> int:
+        """Sort key for the stored graph a point reads (lowest first).
+
+        `low_t_stereoisomer` first, then down the ladder (`stereoisomer`, `isomer`,
+        `formula`), then the finer kinds, then the off-ladder `graph`.
+
+        Examples:
+            >>> sorted(IdentityKind, key=lambda k: k.graph_preference)[:3]
+            [<IdentityKind.LOW_T_STEREOISOMER: 'low_t_stereoisomer'>, \
+<IdentityKind.STEREOISOMER: 'stereoisomer'>, <IdentityKind.ISOMER: 'isomer'>]
+        """
+        rank = self.rank
+        if rank is None:
+            return len(IDENTITY_KIND_LADDER)
+        base = IDENTITY_KIND_LADDER.index(IdentityKind.LOW_T_STEREOISOMER)
+        return base - rank if rank <= base else rank
+
+
+IDENTITY_KIND_LADDER = (
+    IdentityKind.FORMULA,
+    IdentityKind.ISOMER,
+    IdentityKind.STEREOISOMER,
+    IdentityKind.LOW_T_STEREOISOMER,
+    IdentityKind.CONFORMER,
+)
+"""The identity kinds from coarsest to finest (`graph` is off the ladder)."""
 
 
 class ModelHashKind(StrEnum):

@@ -1,18 +1,22 @@
 """Identity module tests."""
 
 from collections.abc import Mapping
+from dataclasses import FrozenInstanceError
 
 import numpy as np
+import protomol
 import pytest
 from autogeom import Geometry
-from pydantic import ValidationError
+from protomol import AnyGraph
 
 from autostorage import GeometryRow
 from autostorage.identity import (
     IdentityAlgorithm,
     IdentityAlgorithmRegistry,
     IdentityKind,
+    IdentityResult,
     hill_formula,
+    protomol_graph,
     rdkit_inchi,
     rdkit_inchi_conn,
     rdkit_smiles,
@@ -106,13 +110,14 @@ class TestIdentityAlgorithmRegistry:
 
         def atom_count_identity_fn(
             geo: Geometry,
+            gra: AnyGraph | None = None,  # noqa: ARG001
             other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
         ) -> str:
             return str(geo.atom_count)
 
         # Order restriction must be compatible with parent
         #  => This raises an error:
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValueError, match="not compatible"):
             algorithm = IdentityAlgorithmRegistry.register(
                 name="atom_count",
                 kind=IdentityKind.FORMULA,
@@ -130,6 +135,35 @@ class TestIdentityAlgorithmRegistry:
         assert IdentityAlgorithmRegistry.get("atom_count") is algorithm
         assert algorithm.parent is rdkit_inchi
         assert algorithm.identity_fn(water) == "3"
+        assert not algorithm.uses_graph
+
+    def test_register_graph_algorithm(
+        self, monkeypatch: pytest.MonkeyPatch, water: Geometry
+    ) -> None:
+        """An algorithm that reads the graph is registered with `uses_graph=True`."""
+        monkeypatch.setattr(
+            IdentityAlgorithmRegistry,
+            "algorithms",
+            list(IdentityAlgorithmRegistry.algorithms),
+        )
+
+        def graph_identity_fn(
+            geo: Geometry,  # noqa: ARG001
+            gra: AnyGraph | None = None,
+            other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
+        ) -> str:
+            assert isinstance(gra, protomol.StereoMolGraph)
+            return protomol.canonical_json(gra)
+
+        algorithm = IdentityAlgorithmRegistry.register(
+            name="graph",
+            kind=IdentityKind.GRAPH,
+            identity_fn=graph_identity_fn,
+            uses_graph=True,
+        )
+        gra = protomol.from_geometry(water)
+        assert algorithm.uses_graph
+        assert algorithm.identity_fn(water, gra) == protomol.canonical_json(gra)
 
     def test_builtin_algorithms(self) -> None:
         """The built-in algorithms have the expected kinds and parents."""
@@ -145,6 +179,42 @@ class TestIdentityAlgorithmRegistry:
         assert hill_formula.kind is IdentityKind.FORMULA
         assert hill_formula.parent is None
         assert hill_formula.orders is None
+        builtins = (rdkit_inchi_conn, rdkit_inchi, rdkit_smiles, hill_formula)
+        assert not any(alg.uses_graph for alg in builtins)
+        assert protomol_graph.kind is IdentityKind.GRAPH
+        assert protomol_graph.orders is None
+        assert protomol_graph.uses_graph
+        assert protomol_graph.stores_graph
+
+    def test_stores_graph_implies_uses_graph(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`register(stores_graph=True)` sets `uses_graph`; the dataclass checks it."""
+        monkeypatch.setattr(
+            IdentityAlgorithmRegistry,
+            "algorithms",
+            list(IdentityAlgorithmRegistry.algorithms),
+        )
+        algorithm = IdentityAlgorithmRegistry.register(
+            name="graph_copy",
+            kind=IdentityKind.GRAPH,
+            identity_fn=protomol_graph.identity_fn,
+            stores_graph=True,
+        )
+        assert algorithm.uses_graph
+        with pytest.raises(ValueError, match="must use one"):
+            IdentityAlgorithm(
+                name="bad",
+                kind=IdentityKind.GRAPH,
+                identity_fn=protomol_graph.identity_fn,
+                stores_graph=True,
+            )
+
+    def test_builtins_ignore_graph(self, water: Geometry) -> None:
+        """The built-in identity functions give the same value with a graph."""
+        gra = protomol.from_geometry(water)
+        for alg in (rdkit_inchi_conn, rdkit_inchi, rdkit_smiles, hill_formula):
+            assert alg.identity_fn(water, gra) == alg.identity_fn(water)
 
 
 class TestIdentityAlgorithm:
@@ -152,14 +222,16 @@ class TestIdentityAlgorithm:
 
     def test_frozen(self) -> None:
         """Algorithms cannot be modified after registration."""
-        with pytest.raises(ValidationError, match="frozen"):
+        with pytest.raises(FrozenInstanceError):
             rdkit_inchi.name = "other"  # ty: ignore[invalid-assignment]
 
     def test_rejects_non_callable(self) -> None:
         """An identity function must be callable."""
-        with pytest.raises(ValidationError):
-            IdentityAlgorithm.model_validate(
-                {"name": "bad", "kind": "formula", "identity_fn": "not callable"}
+        with pytest.raises(TypeError, match="not callable"):
+            IdentityAlgorithm(
+                name="bad",
+                kind=IdentityKind.FORMULA,
+                identity_fn="not callable",  # ty: ignore[invalid-argument-type]
             )
 
 
@@ -193,7 +265,9 @@ class TestBuiltinIdentityFunctions:
         """The SMILES key of an `other_geos` entry with the same InChI is reused."""
         other_geos = {"[H]C([H])([H])[H]": methane.model_copy(deep=True)}
         assert rdkit_smiles.identity_fn(methane) == "C"
-        assert rdkit_smiles.identity_fn(methane, other_geos) == "[H]C([H])([H])[H]"
+        assert (
+            rdkit_smiles.identity_fn(methane, None, other_geos) == "[H]C([H])([H])[H]"
+        )
 
     def test_rdkit_smiles_without_matching_other_geo(
         self, water: Geometry, methane: Geometry
@@ -206,10 +280,26 @@ class TestBuiltinIdentityFunctions:
         assert hill_formula.identity_fn(water) == "H2O"
         assert hill_formula.identity_fn(methane) == "CH4"
 
+    def test_protomol_graph(self, water: Geometry) -> None:
+        """The canonical graph's JSON, and the map back to the given graph."""
+        gra = protomol.from_geometry(water)
+        result = protomol_graph.identity_fn(water, gra)
+        assert isinstance(result, IdentityResult)
+        assert result.value == protomol.canonical_json(gra)
+        assert result.atom_map is not None
+        canonical = protomol.from_json(result.value)
+        inverse = np.argsort(result.atom_map).tolist()
+        assert protomol.relabel(canonical, inverse) == gra  # ty: ignore[invalid-argument-type]
+
+    def test_protomol_graph_needs_graph(self, water: Geometry) -> None:
+        """Without a graph, `protomol_graph@0` raises a ValueError."""
+        with pytest.raises(ValueError, match="needs a graph"):
+            protomol_graph.identity_fn(water)
+
     def test_accepts_geometry_row(self, water: Geometry) -> None:
         """Identity functions accept `GeometryRow`s, including in `other_geos`."""
         row = GeometryRow(**water.model_dump())
         assert rdkit_inchi.identity_fn(row) == "InChI=1S/H2O/h1H2"
         assert rdkit_inchi_conn.identity_fn(row) == "InChI=1S/H2O/h1H2"
-        assert rdkit_smiles.identity_fn(row, {"[H]O[H]": row}) == "[H]O[H]"
+        assert rdkit_smiles.identity_fn(row, None, {"[H]O[H]": row}) == "[H]O[H]"
         assert np.allclose(row.coordinates, water.coordinates)

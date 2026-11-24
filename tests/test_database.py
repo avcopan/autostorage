@@ -267,6 +267,7 @@ class TestRegistryTablesPrePopulated:
                         col(IdentityAlgorithmRow.name) == alg.name
                     )
                 ).one()
+                assert alg_row.stores_graph == alg.stores_graph
                 if alg.parent is not None:
                     parent = sess.get(
                         IdentityAlgorithmRow, alg_row.parent_algorithm_name

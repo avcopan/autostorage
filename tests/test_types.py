@@ -6,10 +6,27 @@ import numpy as np
 import pytest
 
 from autostorage.types import (
+    IDENTITY_KIND_LADDER,
     CompressedArrayTypeDecorator,
     CompressedJSONTypeDecorator,
+    IdentityKind,
     _decompress,
 )
+
+
+def test_identity_kind_hierarchy() -> None:
+    """The ladder runs coarse to fine; a stored graph prefers low-T, then coarser."""
+    assert [k.rank for k in IDENTITY_KIND_LADDER] == list(range(5))
+    assert IdentityKind.GRAPH.rank is None
+    preferred = sorted(IdentityKind, key=lambda k: k.graph_preference)
+    assert preferred == [
+        IdentityKind.LOW_T_STEREOISOMER,
+        IdentityKind.STEREOISOMER,
+        IdentityKind.ISOMER,
+        IdentityKind.FORMULA,
+        IdentityKind.CONFORMER,
+        IdentityKind.GRAPH,
+    ]
 
 
 def test_decompress_limit() -> None:
