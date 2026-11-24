@@ -6,6 +6,7 @@ sessions in the same process.
 """
 
 import warnings
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -37,11 +38,14 @@ from .models import (
     ModelRow,
     PropertyKindRow,
     PropertyValueRow,
+    StageRow,
+    StageStationaryLink,
     StationaryPointRow,
     StepRow,
     TrajectoryAxisRow,
     TrajectoryRow,
     geometry_hash,
+    stage_hash,
 )
 from .property import PropertyKindRegistry, hessian_property_kind
 from .types import AxisKind
@@ -188,6 +192,216 @@ def _pending[T](session: Session, cls: type[T]) -> list[T]:
     session while iterating.
     """
     return [obj for obj in (*session.new, *session.dirty) if isinstance(obj, cls)]
+
+
+def _has_changes(obj: object, *names: str) -> bool:
+    """Return whether any of the attributes `names` of `obj` changed."""
+    state = inspect(obj)
+    return any(state.attrs[name].history.has_changes() for name in names)
+
+
+def _link_stage(session: Session, link: StageStationaryLink) -> StageRow | None:
+    """Return the stage of `link`, via its relationship or foreign key."""
+    if link.stage is not None:
+        return link.stage
+    if link.stage_id is not None:
+        return session.get(StageRow, link.stage_id)
+    return None
+
+
+def _link_point(
+    session: Session, link: StageStationaryLink
+) -> StationaryPointRow | None:
+    """Return the stationary point of `link`, via its relationship or foreign key."""
+    if link.stationary is not None:
+        return link.stationary
+    if link.stationary_id is not None:
+        return session.get(StationaryPointRow, link.stationary_id)
+    return None
+
+
+def _live_stage_links(session: Session, stage: StageRow) -> list[StageStationaryLink]:
+    """Return the links of `stage` that will remain after this flush.
+
+    A link removed from its point's `stage_links` stays in the stage's list until
+    the flush deletes it as an orphan, so it is left out here.
+    """
+    return [
+        link
+        for link in stage.stationary_links
+        if link not in session.deleted
+        and not (
+            link.stationary is None
+            and inspect(link).attrs["stationary"].history.deleted
+        )
+    ]
+
+
+def _stages_changed_by(session: Session, obj: object) -> list[StageRow | None]:
+    """Return the stages whose content a new or dirty `obj` changes."""
+    if isinstance(obj, StageRow):
+        changed = obj in session.new or _has_changes(obj, "stationary_links", "is_ts")
+        return [obj] if changed else []
+    if isinstance(obj, StageStationaryLink):
+        if obj in session.new:
+            return [_link_stage(session, obj)]
+        fields = ("count", "stage", "stage_id", "stationary", "stationary_id")
+        if not _has_changes(obj, *fields):
+            return []
+        old_stages = inspect(obj).attrs["stage"].history.deleted
+        return [_link_stage(session, obj), *old_stages]
+    if isinstance(obj, StationaryPointRow):
+        removed = inspect(obj).attrs["stage_links"].history.deleted
+        return [_link_stage(session, link) for link in removed]
+    return []
+
+
+def _changed_stages(session: Session) -> list[StageRow]:
+    """Return new stages, and stages whose links or `is_ts` changed in this flush.
+
+    A stage that loses a link only because its point is deleted is not included:
+    stages are kept when their points are deleted.
+    """
+    candidates = [
+        stage
+        for obj in (*session.new, *session.dirty)
+        for stage in _stages_changed_by(session, obj)
+    ]
+    for obj in session.deleted:
+        if isinstance(obj, StageStationaryLink):
+            point = _link_point(session, obj)
+            if point is None or point not in session.deleted:
+                candidates.append(_link_stage(session, obj))
+    stages = {
+        id(stage): stage
+        for stage in candidates
+        if stage is not None and stage not in session.deleted
+    }
+    return list(stages.values())
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_stage_points_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Verify that each new or changed stage has a point, and a TS stage just one.
+
+    A TS stage holds exactly one point, with count 1.
+    """
+    for stage in _changed_stages(session):
+        links = _live_stage_links(session, stage)
+        if not links:
+            msg = f"StageRow {stage.id} has no stationary points."
+            raise ValueError(msg)
+        if stage.is_ts and (len(links) != 1 or links[0].count != 1):
+            counts = [link.count for link in links]
+            msg = (
+                f"TS StageRow {stage.id} must hold exactly one stationary point "
+                f"with count 1, but has counts {counts}."
+            )
+            raise ValueError(msg)
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def set_stage_hash_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Set `hash` on new or changed stages; its unique index rejects duplicates.
+
+    Runs before the flush, since a stage's links are separate rows that a mapper
+    "before_insert" hook can't see.
+    """
+    for stage in _changed_stages(session):
+        links = _live_stage_links(session, stage)
+        pairs = [(link.point_id, link.count) for link in links]
+        stage.hash = stage_hash(pairs, is_ts=stage.is_ts)
+
+
+def _step_stage(session: Session, step: StepRow, which: str) -> StageRow | None:
+    """Return `step.stage<which>`, via its relationship or foreign key."""
+    stage = getattr(step, f"stage{which}")
+    if stage is not None:
+        return stage
+    stage_id = getattr(step, f"stage_id{which}")
+    return None if stage_id is None else session.get(StageRow, stage_id)
+
+
+def _stage_composition(
+    session: Session, stage: StageRow
+) -> tuple[Counter[str], int] | None:
+    """Return the element counts and total charge of `stage`, weighted by counts.
+
+    Returns `None` if a point or geometry is missing (the database rejects those).
+    """
+    elements: Counter[str] = Counter()
+    charge = 0
+    for link in _live_stage_links(session, stage):
+        point = _link_point(session, link)
+        geo_row = None if point is None else _resolve_geometry(session, point)
+        if geo_row is None:
+            return None
+        for symbol in geo_row.symbols:
+            elements[symbol] += link.count
+        charge += link.count * geo_row.charge
+    return elements, charge
+
+
+def _composition_difference(
+    reference: tuple[Counter[str], int], other: tuple[Counter[str], int]
+) -> str:
+    """Describe how `other` differs from `reference` (e.g. ``H: -1, charge: +1``)."""
+    (ref_elements, ref_charge), (elements, charge) = reference, other
+    diffs = {
+        symbol: elements[symbol] - ref_elements[symbol]
+        for symbol in sorted(ref_elements.keys() | elements.keys())
+    }
+    diffs["charge"] = charge - ref_charge
+    return ", ".join(f"{key}: {diff:+d}" for key, diff in diffs.items() if diff)
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_step_balance_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Verify that a step's stages have the same elements and total charge.
+
+    Runs for new or changed steps, and the steps of changed stages. Elements and
+    charges are summed over each stage's points, times their counts. Spin is not
+    checked, since steps may be spin-forbidden.
+    """
+    steps = {id(step): step for step in _pending(session, StepRow)}
+    for stage in _changed_stages(session):
+        steps.update((id(step), step) for step in stage.steps)
+
+    for step in steps.values():
+        if step in session.deleted:
+            continue
+        stages = {
+            which: _step_stage(session, step, which) for which in ("1", "2", "_ts")
+        }
+        compositions = {
+            which: _stage_composition(session, stage)
+            for which, stage in stages.items()
+            if stage is not None
+        }
+        reference = compositions.get("1")
+        if reference is None:
+            continue
+        for which in ("2", "_ts"):
+            other = compositions.get(which)
+            if other is not None and other != reference:
+                diff = _composition_difference(reference, other)
+                msg = (
+                    f"StepRow {step.id} is unbalanced: stage{which} differs from "
+                    f"stage1 by {diff}."
+                )
+                raise ValueError(msg)
 
 
 def _property_kind_name(obj: PropertyValueRow) -> str | None:

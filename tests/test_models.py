@@ -4,7 +4,7 @@ import json
 import tempfile
 import uuid
 import zlib
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import numpy as np
@@ -862,45 +862,207 @@ class TestStationaryPointRow:
 class TestStageRow:
     """Tests for StageRow model."""
 
-    def test_create_stage_non_ts(self, database: Database) -> None:
+    def test_create_stage_non_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StageRow can be created as a non-TS stage."""
         with database.session() as session:
-            stage = StageRow(is_ts=False)
+            stage = make_stage()
             session.add(stage)
             session.commit()
 
             assert stage.id is not None
             assert stage.is_ts is False
 
-    def test_create_stage_ts(self, database: Database) -> None:
+    def test_create_stage_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StageRow can be created as a TS stage."""
         with database.session() as session:
-            stage = StageRow(is_ts=True)
+            stage = make_stage(is_ts=True)
             session.add(stage)
             session.commit()
 
             assert stage.id is not None
             assert stage.is_ts is True
 
-    def test_stage_relationships(self, database: Database) -> None:
-        """StageRow relationships are initially empty."""
+    def test_stage_relationships(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """A new stage has its point and no steps."""
         with database.session() as session:
-            stage = StageRow(is_ts=False)
+            stage = make_stage()
             session.add(stage)
             session.commit()
 
-            assert stage.stationaries == []
+            assert len(stage.stationaries) == 1
             assert stage.steps == []
+
+    def test_from_points_counts_repeats(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """`from_points` gives one link per point, counting repeats."""
+        a, b = make_point(), make_point()
+        stage = StageRow.from_points([a, b, a])
+        assert [(link.stationary, link.count) for link in stage.stationary_links] == [
+            (a, 2),
+            (b, 1),
+        ]
+
+        with database.session() as session:
+            session.add(stage)
+            session.commit()
+
+            links = session.exec(select(StageStationaryLink)).all()
+            assert sorted(link.count for link in links) == [1, 2]
+            assert {p.id for p in stage.stationaries} == {a.id, b.id}
+            assert [s.id for s in a.stages] == [stage.id]
+
+    def test_removing_link_deletes_it(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """Removing a link from either side's list deletes it."""
+        a, b, c = make_point(), make_point(), make_point()
+        stage = StageRow.from_points([a, b, c])
+        with database.session() as session:
+            session.add(stage)
+            session.commit()
+
+            stage.stationary_links.pop(0)
+            b.stage_links.clear()
+            session.commit()
+
+            links = session.exec(select(StageStationaryLink)).all()
+            assert [link.stationary_id for link in links] == [c.id]
+            session.expire(stage)
+            assert [p.id for p in stage.stationaries] == [c.id]
+
+    def test_empty_stage_raises(self, database: Database) -> None:
+        """A stage without points is rejected on flush."""
+        with database.session() as session:
+            session.add(StageRow())
+            with pytest.raises(ValueError, match="has no stationary points"):
+                session.flush()
+
+    def test_removing_last_link_raises(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """Removing a stage's last link is rejected on flush."""
+        with database.session() as session:
+            stage = make_stage()
+            session.add(stage)
+            session.commit()
+
+            stage.stationary_links.clear()
+            with pytest.raises(ValueError, match="has no stationary points"):
+                session.flush()
+
+    def test_deleting_point_keeps_stage(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """Deleting a stage's only point deletes its link, but keeps the stage."""
+        with database.session() as session:
+            stage = make_stage()
+            session.add(stage)
+            session.commit()
+
+            session.delete(stage.stationaries[0])
+            session.commit()
+
+            assert session.exec(select(StageStationaryLink)).all() == []
+            assert session.exec(select(StageRow)).all() == [stage]
+
+    @pytest.mark.parametrize("points", [[0, 1], [0, 0]])
+    def test_ts_stage_with_more_than_one_point_raises(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        points: list[int],
+    ) -> None:
+        """A TS stage must hold exactly one point with count 1."""
+        made = [make_point(order=1), make_point(order=1)]
+        with database.session() as session:
+            session.add(StageRow.from_points([made[i] for i in points], is_ts=True))
+            with pytest.raises(ValueError, match="exactly one stationary point"):
+                session.flush()
+
+    def test_count_must_be_positive(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """A link count below 1 is rejected by the database."""
+        with database.session() as session:
+            stage = make_stage()
+            stage.stationary_links[0].count = 0
+            session.add(stage)
+            with pytest.raises(IntegrityError, match="chk_stage_count"):
+                session.flush()
+
+
+class TestStageGetOrCreate:
+    """Tests for StageRow.get_or_create."""
+
+    def test_same_points_same_row_pending(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """The same points, in any order, give the pending stage."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, [a, a, b])
+            assert stage in session.new
+            assert StageRow.get_or_create(session, [b, a, a]) is stage
+            session.commit()
+            assert len(session.exec(select(StageRow)).all()) == 1
+
+    def test_same_points_same_row_persisted(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """The same points give the stored stage."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, [a, b])
+            ids = (a.id, b.id)
+            session.commit()
+            stage_id = stage.id
+
+        with database.session() as session:
+            a, b = (session.get_one(StationaryPointRow, i) for i in ids)
+            found = StageRow.get_or_create(session, [b, a])
+            assert found.id == stage_id
+            assert found not in session.new
+
+    @pytest.mark.parametrize(
+        ("points", "is_ts"), [([0, 0, 1], False), ([0], False), ([0, 1], True)]
+    )
+    def test_different_content_different_row(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        points: list[int],
+        is_ts: bool,  # noqa: FBT001
+    ) -> None:
+        """Different counts, points, or `is_ts` give a different stage."""
+        made = [make_point(), make_point()]
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, made)
+            session.commit()
+
+            other = StageRow.get_or_create(
+                session, [made[i] for i in points], is_ts=is_ts
+            )
+            assert other is not stage
+            assert other in session.new
 
 
 class TestStepRow:
     """Tests for StepRow model."""
 
-    def test_create_barrierless_step(self, database: Database) -> None:
+    def test_create_barrierless_step(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StepRow can be created as a barrierless step."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -917,13 +1079,15 @@ class TestStepRow:
             assert step.stage_id_ts is None
             assert step.is_barrierless is True
 
-    def test_create_step_with_ts(self, database: Database) -> None:
+    def test_create_step_with_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StepRow can be created with a transition state."""
         with database.session() as session:
             stage1, stage2 = sorted(
-                [StageRow(is_ts=False), StageRow(is_ts=False)], key=lambda s: str(s.id)
+                [make_stage(), make_stage()], key=lambda s: str(s.id)
             )
-            stage_ts = StageRow(is_ts=True)
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -940,12 +1104,14 @@ class TestStepRow:
             assert step.stage_id_ts == stage_ts.id
             assert step.is_barrierless is False
 
-    def test_step_unique_constraint(self, database: Database) -> None:
+    def test_step_unique_constraint(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StepRow enforces unique constraint on stage IDs."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
-            stage_ts = StageRow(is_ts=True)
+            stage1 = make_stage()
+            stage2 = make_stage()
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -970,13 +1136,15 @@ class TestStepRow:
             with pytest.raises(IntegrityError):
                 session.commit()
 
-    def test_step_stage_relationships(self, database: Database) -> None:
+    def test_step_stage_relationships(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StepRow stage relationships work correctly."""
         with database.session() as session:
             stage1, stage2 = sorted(
-                [StageRow(is_ts=False), StageRow(is_ts=False)], key=lambda s: str(s.id)
+                [make_stage(), make_stage()], key=lambda s: str(s.id)
             )
-            stage_ts = StageRow(is_ts=True)
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -1148,9 +1316,13 @@ class TestLinkModels:
         """
         with database.session() as session:
             geo = GeometryRow(symbols=["H", "H"], coordinates=[[0, 0, 0], [0, 0, 0.74]])
-            stage1, stage2 = StageRow(), StageRow()
-            point = StationaryPointRow(
-                geometry=geo, calculation=calculation, stages=[stage1]
+            point, other = (
+                StationaryPointRow(geometry=geo, calculation=calculation)
+                for _ in range(2)
+            )
+            stage1, stage2 = (
+                StageRow.from_points([point]),
+                StageRow.from_points([other]),
             )
             step = StepRow(stage1=stage1, stage2=stage2, is_barrierless=True)
             step.validations.append(
@@ -1285,7 +1457,9 @@ class TestLinkModels:
 
             assert link.role == "output"
 
-    def test_stage_stationary_link(self, database: Database) -> None:
+    def test_stage_stationary_link(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StageStationaryLink can be created."""
         with database.session() as session:
             model = ModelRow(program="psi4", method="B3LYP")
@@ -1301,7 +1475,7 @@ class TestLinkModels:
             session.flush()
 
             stat_pt = StationaryPointRow(geometry=geom, calculation=calc)
-            stage = StageRow(is_ts=False)
+            stage = make_stage()
             session.add_all([stat_pt, stage])
             session.flush()
 
@@ -1312,11 +1486,13 @@ class TestLinkModels:
             assert link.stationary_id == stat_pt.id
             assert link.stage_id == stage.id
 
-    def test_step_validation_link(self, database: Database) -> None:
+    def test_step_validation_link(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """StepValidationLink can be created."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 

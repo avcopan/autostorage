@@ -36,10 +36,12 @@ from autostorage.models import (
     PropertyKindRow,
     PropertyValueRow,
     StageRow,
+    StageStationaryLink,
     StationaryPointRow,
     StepRow,
     TrajectoryRow,
     geometry_hash,
+    stage_hash,
 )
 
 # Test data constants
@@ -246,14 +248,101 @@ class TestSetGeometryHash:
             assert found.id == geo.id
 
 
+class TestSetStageHash:
+    """Tests for set_stage_hash_before_flush and stage_hash."""
+
+    def test_hash_ignores_order_and_counts_repeats(self) -> None:
+        """The hash ignores point order, but not counts or `is_ts`."""
+        a, b = uuid.uuid4(), uuid.uuid4()
+        value = stage_hash([(a, 2), (b, 1)], is_ts=False)
+        assert stage_hash([(b, 1), (a, 2)], is_ts=False) == value
+        assert stage_hash([(a, 1), (b, 1)], is_ts=False) != value
+        assert stage_hash([(a, 2), (b, 1)], is_ts=True) != value
+
+    def test_hash_set_on_flush(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A new stage's hash is set from its points and counts."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b, a])
+            session.add(stage)
+            session.flush()
+            assert stage.hash == stage_hash([(a.id, 2), (b.id, 1)], is_ts=False)
+
+    def test_duplicate_stage_raises(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A second stage with the same content, built by hand, is rejected."""
+        a = make_point()
+        with database.session() as session:
+            session.add(StageRow.from_points([a]))
+            session.commit()
+
+            session.add(StageRow.from_points([a]))
+            with pytest.raises(IntegrityError):
+                session.commit()
+
+    @pytest.mark.parametrize("change", ["add", "remove", "recount", "is_ts"])
+    def test_changing_links_rehashes(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        change: str,
+    ) -> None:
+        """Adding, removing, or recounting a link, or changing `is_ts`, rehashes."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b])
+            session.add(stage)
+            session.commit()
+
+            if change == "add":
+                c = make_point()
+                stage.stationary_links.append(StageStationaryLink(stationary=c))
+                expected = [(a.id, 1), (b.id, 1), (c.id, 1)]
+            elif change == "remove":
+                b.stage_links.clear()
+                expected = [(a.id, 1)]
+            elif change == "recount":
+                stage.stationary_links[0].count = 2
+                link_a, link_b = stage.stationary_links
+                expected = [(link_a.point_id, 2), (link_b.point_id, 1)]
+            else:
+                b.stage_links.clear()
+                stage.is_ts = True
+                expected = [(a.id, 1)]
+            session.commit()
+
+            is_ts = change == "is_ts"
+            assert stage.hash == stage_hash(expected, is_ts=is_ts)
+
+    def test_deleting_point_keeps_hash(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """Deleting a point leaves its stages' hashes as they were."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b])
+            session.add(stage)
+            session.commit()
+            value = stage.hash
+
+            session.delete(b)
+            session.commit()
+            assert stage.hash == value
+
+
 class TestSortStepStageIds:
     """Tests for sort_step_stage_ids event listener."""
 
-    def test_stage_ids_sorted_on_insert(self, database: Database) -> None:
+    def test_stage_ids_sorted_on_insert(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """stage_id1 and stage_id2 are auto-sorted on insert."""
         with database.session() as session:
             # Create two stages, named by the order of their ids
-            stages = [StageRow(is_ts=False) for _ in range(2)]
+            stages = [make_stage() for _ in range(2)]
             session.add_all(stages)
             session.flush()
             stage_small, stage_large = sorted(stages, key=lambda s: str(s.id))
@@ -274,11 +363,13 @@ class TestSortStepStageIds:
             assert step.stage_id1 == stage_small.id
             assert step.stage_id2 == stage_large.id
 
-    def test_stage_ids_sorted_on_update(self, database: Database) -> None:
+    def test_stage_ids_sorted_on_update(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """stage_id1 and stage_id2 are auto-sorted on update."""
         with database.session() as session:
             # Create three stages, named so that A < B < C
-            stages = [StageRow(is_ts=False) for _ in range(3)]
+            stages = [make_stage() for _ in range(3)]
             session.add_all(stages)
             session.flush()
             stage_a, stage_b, stage_c = sorted(stages, key=lambda s: str(s.id))
@@ -304,11 +395,13 @@ class TestSortStepStageIds:
             assert step.stage_id1 == stage_a.id
             assert step.stage_id2 == stage_c.id
 
-    def test_equal_stage_ids_unchanged(self, database: Database) -> None:
+    def test_equal_stage_ids_unchanged(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """If stage_id1 == stage_id2, they remain unchanged."""
         with database.session() as session:
             # Create a single stage
-            stage = StageRow(is_ts=False)
+            stage = make_stage()
             session.add(stage)
             session.flush()
 
@@ -324,11 +417,13 @@ class TestSortStepStageIds:
             with pytest.raises(IntegrityError):
                 session.commit()
 
-    def test_sorting_three_stage_ids(self, database: Database) -> None:
+    def test_sorting_three_stage_ids(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Sorting works with three different stages."""
         with database.session() as session:
             # Create three stages, named so that X < Y < Z
-            stages = [StageRow(is_ts=False) for _ in range(3)]
+            stages = [make_stage() for _ in range(3)]
             session.add_all(stages)
             session.flush()
             stage_x, _, stage_z = sorted(stages, key=lambda s: str(s.id))
@@ -353,12 +448,14 @@ class TestSortStepStageIds:
 class TestVerifyStepBarrierlessConsistency:
     """Tests for verify_step_barrierless_consistency event listener."""
 
-    def test_barrierless_requires_no_ts(self, database: Database) -> None:
+    def test_barrierless_requires_no_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless step (stage_id_ts=None) must have is_barrierless=True."""
         with database.session() as session:
             # Create two stages
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -374,12 +471,14 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=True"):
                 session.flush()
 
-    def test_non_barrierless_requires_ts(self, database: Database) -> None:
+    def test_non_barrierless_requires_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Non-barrierless step must have stage_id_ts!=None."""
         with database.session() as session:
             # Create three stages (two regular, one TS)
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -395,11 +494,13 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=True"):
                 session.flush()
 
-    def test_barrierless_step_valid(self, database: Database) -> None:
+    def test_barrierless_step_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless step with is_barrierless=True and stage_id_ts=None is valid."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -416,12 +517,14 @@ class TestVerifyStepBarrierlessConsistency:
             assert step.stage_id_ts is None
             assert step.is_barrierless is True
 
-    def test_step_with_ts_valid(self, database: Database) -> None:
+    def test_step_with_ts_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Step with transition state and is_barrierless=False is valid."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
-            stage_ts = StageRow(is_ts=True)
+            stage1 = make_stage()
+            stage2 = make_stage()
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -439,13 +542,13 @@ class TestVerifyStepBarrierlessConsistency:
             assert step.is_barrierless is False
 
     def test_step_with_ts_requires_is_barrierless_false(
-        self, database: Database
+        self, make_stage: Callable[..., StageRow], database: Database
     ) -> None:
         """Step with stage_id_ts!=None must have is_barrierless=False."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
-            stage_ts = StageRow(is_ts=True)
+            stage1 = make_stage()
+            stage2 = make_stage()
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -461,11 +564,13 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=False"):
                 session.flush()
 
-    def test_barrierless_consistency_on_update(self, database: Database) -> None:
+    def test_barrierless_consistency_on_update(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless consistency is checked on update."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -483,6 +588,109 @@ class TestVerifyStepBarrierlessConsistency:
             step.is_barrierless = False
 
             with pytest.raises(ValueError, match="must have is_barrierless=True"):
+                session.flush()
+
+
+class TestVerifyStepBalance:
+    """Tests for verify_step_balance_before_flush."""
+
+    def test_balanced_step_passes(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A -> B with the same atoms and charge passes, with or without a TS."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point()]),
+                stage_ts=StageRow.from_points([make_point(order=1)], is_ts=True),
+            )
+            session.add(step)
+            session.commit()
+
+    def test_counts_are_weighted(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A + A -> A2 passes, since the count of A is 2."""
+        h_atom = make_point(["H"], spin=1)
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([h_atom, h_atom]),
+                stage2=StageRow.from_points([make_point()]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "diff"),
+        [
+            ({"symbols": ["H", "H", "H"], "spin": 1}, "H: [+-]1"),
+            ({"charge": 1, "spin": 1}, "charge: [+-]1"),
+        ],
+    )
+    def test_unbalanced_step_raises(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        kwargs: dict[str, Any],
+        diff: str,
+    ) -> None:
+        """A missing atom or a charge mismatch raises, naming the difference."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point(**kwargs)]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            with pytest.raises(ValueError, match=f"StepRow {step.id} .*{diff}"):
+                session.flush()
+
+    def test_unbalanced_ts_raises(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A TS stage with different atoms raises."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point()]),
+                stage_ts=StageRow.from_points(
+                    [make_point(["H", "H", "H"], spin=1, order=1)], is_ts=True
+                ),
+            )
+            session.add(step)
+            with pytest.raises(ValueError, match="stage_ts differs from stage1"):
+                session.flush()
+
+    def test_spin_change_passes(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A spin-forbidden step (singlet -> triplet) passes."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point(spin=2)]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+    def test_changing_a_stage_rechecks_its_steps(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """Adding a point to a stored step's stage unbalances the step."""
+        with database.session() as session:
+            stage1 = StageRow.from_points([make_point()])
+            step = StepRow(
+                stage1=stage1,
+                stage2=StageRow.from_points([make_point()]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+            stage1.stationary_links[0].count = 2
+            with pytest.raises(ValueError, match="unbalanced"):
                 session.flush()
 
 
