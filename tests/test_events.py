@@ -591,6 +591,109 @@ class TestVerifyStepBarrierlessConsistency:
                 session.flush()
 
 
+class TestVerifyStepBalance:
+    """Tests for verify_step_balance_before_flush."""
+
+    def test_balanced_step_passes(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A -> B with the same atoms and charge passes, with or without a TS."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point()]),
+                stage_ts=StageRow.from_points([make_point(order=1)], is_ts=True),
+            )
+            session.add(step)
+            session.commit()
+
+    def test_counts_are_weighted(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A + A -> A2 passes, since the count of A is 2."""
+        h_atom = make_point(["H"], spin=1)
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([h_atom, h_atom]),
+                stage2=StageRow.from_points([make_point()]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "diff"),
+        [
+            ({"symbols": ["H", "H", "H"], "spin": 1}, "H: [+-]1"),
+            ({"charge": 1, "spin": 1}, "charge: [+-]1"),
+        ],
+    )
+    def test_unbalanced_step_raises(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        kwargs: dict[str, Any],
+        diff: str,
+    ) -> None:
+        """A missing atom or a charge mismatch raises, naming the difference."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point(**kwargs)]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            with pytest.raises(ValueError, match=f"StepRow {step.id} .*{diff}"):
+                session.flush()
+
+    def test_unbalanced_ts_raises(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A TS stage with different atoms raises."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point()]),
+                stage_ts=StageRow.from_points(
+                    [make_point(["H", "H", "H"], spin=1, order=1)], is_ts=True
+                ),
+            )
+            session.add(step)
+            with pytest.raises(ValueError, match="stage_ts differs from stage1"):
+                session.flush()
+
+    def test_spin_change_passes(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A spin-forbidden step (singlet -> triplet) passes."""
+        with database.session() as session:
+            step = StepRow(
+                stage1=StageRow.from_points([make_point()]),
+                stage2=StageRow.from_points([make_point(spin=2)]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+    def test_changing_a_stage_rechecks_its_steps(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """Adding a point to a stored step's stage unbalances the step."""
+        with database.session() as session:
+            stage1 = StageRow.from_points([make_point()])
+            step = StepRow(
+                stage1=stage1,
+                stage2=StageRow.from_points([make_point()]),
+                is_barrierless=True,
+            )
+            session.add(step)
+            session.commit()
+
+            stage1.stationary_links[0].count = 2
+            with pytest.raises(ValueError, match="unbalanced"):
+                session.flush()
+
+
 class TestVerifyTrajectoryGeometryNdim:
     """Tests for verify_trajectory_geometry_ndim event listener."""
 

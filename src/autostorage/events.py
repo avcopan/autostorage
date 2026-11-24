@@ -6,6 +6,7 @@ sessions in the same process.
 """
 
 import warnings
+from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
@@ -318,6 +319,89 @@ def set_stage_hash_before_flush(
         links = _live_stage_links(session, stage)
         pairs = [(link.point_id, link.count) for link in links]
         stage.hash = stage_hash(pairs, is_ts=stage.is_ts)
+
+
+def _step_stage(session: Session, step: StepRow, which: str) -> StageRow | None:
+    """Return `step.stage<which>`, via its relationship or foreign key."""
+    stage = getattr(step, f"stage{which}")
+    if stage is not None:
+        return stage
+    stage_id = getattr(step, f"stage_id{which}")
+    return None if stage_id is None else session.get(StageRow, stage_id)
+
+
+def _stage_composition(
+    session: Session, stage: StageRow
+) -> tuple[Counter[str], int] | None:
+    """Return the element counts and total charge of `stage`, weighted by counts.
+
+    Returns `None` if a point or geometry is missing (the database rejects those).
+    """
+    elements: Counter[str] = Counter()
+    charge = 0
+    for link in _live_stage_links(session, stage):
+        point = _link_point(session, link)
+        geo_row = None if point is None else _resolve_geometry(session, point)
+        if geo_row is None:
+            return None
+        for symbol in geo_row.symbols:
+            elements[symbol] += link.count
+        charge += link.count * geo_row.charge
+    return elements, charge
+
+
+def _composition_difference(
+    reference: tuple[Counter[str], int], other: tuple[Counter[str], int]
+) -> str:
+    """Describe how `other` differs from `reference` (e.g. ``H: -1, charge: +1``)."""
+    (ref_elements, ref_charge), (elements, charge) = reference, other
+    diffs = {
+        symbol: elements[symbol] - ref_elements[symbol]
+        for symbol in sorted(ref_elements.keys() | elements.keys())
+    }
+    diffs["charge"] = charge - ref_charge
+    return ", ".join(f"{key}: {diff:+d}" for key, diff in diffs.items() if diff)
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_step_balance_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Verify that a step's stages have the same elements and total charge.
+
+    Runs for new or changed steps, and the steps of changed stages. Elements and
+    charges are summed over each stage's points, times their counts. Spin is not
+    checked, since steps may be spin-forbidden.
+    """
+    steps = {id(step): step for step in _pending(session, StepRow)}
+    for stage in _changed_stages(session):
+        steps.update((id(step), step) for step in stage.steps)
+
+    for step in steps.values():
+        if step in session.deleted:
+            continue
+        stages = {
+            which: _step_stage(session, step, which) for which in ("1", "2", "_ts")
+        }
+        compositions = {
+            which: _stage_composition(session, stage)
+            for which, stage in stages.items()
+            if stage is not None
+        }
+        reference = compositions.get("1")
+        if reference is None:
+            continue
+        for which in ("2", "_ts"):
+            other = compositions.get(which)
+            if other is not None and other != reference:
+                diff = _composition_difference(reference, other)
+                msg = (
+                    f"StepRow {step.id} is unbalanced: stage{which} differs from "
+                    f"stage1 by {diff}."
+                )
+                raise ValueError(msg)
 
 
 def _property_kind_name(obj: PropertyValueRow) -> str | None:
