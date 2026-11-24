@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import autogeom
+import protomol
 from autogeom import Geometry
 from protomol import AnyGraph
 
@@ -17,6 +18,7 @@ __all__ = [
     "IdentityProtocol",
     "IdentityResult",
     "hill_formula",
+    "protomol_graph",
     "rdkit_inchi",
     "rdkit_inchi_conn",
     "rdkit_smiles",
@@ -78,6 +80,9 @@ class IdentityAlgorithm:
         uses_graph: Whether `identity_fn` reads `gra`. Such an algorithm is passed
             the point's graph, perceived from the geometry for a minimum, and is
             skipped for a saddle point without one.
+        stores_graph: Whether the value is the canonical graph (`protomol.to_json`)
+            and the result's `atom_map` maps it to the geometry, so that the
+            point's graph can be rebuilt from the link. Implies `uses_graph`.
     """
 
     name: str
@@ -86,6 +91,7 @@ class IdentityAlgorithm:
     parent: "IdentityAlgorithm | None" = None
     orders: frozenset[int] | None = None
     uses_graph: bool = False
+    stores_graph: bool = False
 
     def applies_to(self, order: int) -> bool:
         """Check whether algorithm applies to a given order."""
@@ -96,11 +102,18 @@ class IdentityAlgorithm:
 
         Raises:
             TypeError: If `identity_fn` isn't callable.
-            ValueError: If the orders aren't a subset of the parent's orders.
+            ValueError: If the orders aren't a subset of the parent's orders, or
+                `stores_graph` is set without `uses_graph`.
         """
         if not callable(self.identity_fn):
             msg = f"Identity function of {self.name!r} is not callable."
             raise TypeError(msg)
+
+        if self.stores_graph and not self.uses_graph:
+            msg = (
+                f"Identity algorithm {self.name!r} stores a graph, so it must use one."
+            )
+            raise ValueError(msg)
 
         if self.parent is None or self.parent.orders is None:
             return
@@ -131,6 +144,7 @@ class IdentityAlgorithmRegistry:
         parent: IdentityAlgorithm | None = None,
         orders: Iterable[int] | None = None,
         uses_graph: bool = False,
+        stores_graph: bool = False,
     ) -> IdentityAlgorithm:
         """Create and register an identity algorithm.
 
@@ -148,6 +162,10 @@ class IdentityAlgorithmRegistry:
                 applies to any order.
             uses_graph: Whether `identity_fn` reads its `gra` argument. Graphs are
                 only perceived for points that such an algorithm applies to.
+            stores_graph: Whether `identity_fn` returns an `IdentityResult` whose
+                value is the canonical graph's JSON and whose `atom_map` maps it to
+                the geometry. The point's `graph` is read back from such a link.
+                Sets `uses_graph`.
 
         Raises:
             ValueError: If an algorithm named `name` is already registered, or
@@ -163,7 +181,8 @@ class IdentityAlgorithmRegistry:
             identity_fn=identity_fn,
             parent=parent,
             orders=orders,
-            uses_graph=uses_graph,
+            uses_graph=uses_graph or stores_graph,
+            stores_graph=stores_graph,
         )
         cls.algorithms.append(algorithm)
         return algorithm
@@ -266,3 +285,34 @@ hill_formula = IdentityAlgorithmRegistry.register(
     identity_fn=hill_formula_identity_fn,
 )
 """Molecular formula in Hill order (kind: formula)."""
+
+
+def protomol_graph_identity_fn(
+    geo: Geometry,  # noqa: ARG001
+    gra: AnyGraph | None = None,
+    other_geos: OtherGeometries = None,  # noqa: ARG001
+) -> IdentityResult:
+    """The canonical graph's JSON, with the atom map from it to the geometry.
+
+    Raises:
+        ValueError: If no graph is given.
+    """
+    if gra is None:
+        msg = "protomol_graph@0 needs a graph."
+        raise ValueError(msg)
+    canonical, atom_map = protomol.canonical_form(gra)  # ty: ignore[invalid-argument-type]
+    return IdentityResult(protomol.to_json(canonical), atom_map=atom_map)
+
+
+protomol_graph = IdentityAlgorithmRegistry.register(
+    name="protomol_graph@0",
+    kind=IdentityKind.GRAPH,
+    identity_fn=protomol_graph_identity_fn,
+    stores_graph=True,
+)
+"""The protomol graph as given, canonicalized (kind: graph; stores the graph).
+
+Interim: it stands in for the SMG schemes and is dropped once `smg_low_t@1` exists.
+An order-0 point without a graph gets one perceived from its geometry (one Lewis
+structure perception per point); a saddle point needs its reaction graph.
+"""

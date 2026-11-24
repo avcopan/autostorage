@@ -12,7 +12,10 @@ import pint
 import py3Dmol
 from autogeom import Geometry, angle, dihedral, distance, ureg
 from autogeom.types import CoordinatesField
+from protomol import AnyGraph, from_json, relabel
+from sqlalchemy import inspect
 from sqlalchemy.ext.mutable import MutableDict
+from sqlalchemy.orm.attributes import flag_dirty
 from sqlmodel import (
     JSON,
     CheckConstraint,
@@ -743,6 +746,11 @@ class StationaryPointRow(SQLModel, table=True):
         stage_links: Link rows to the stages this point belongs to, with counts.
         stages: Stages this point belongs to, each once. Read-only (reflects the
             stored links); write `stage_links`.
+        graph: The protomol graph of the point, index-aligned with its geometry.
+            The pending input if one was set, else the graph read back from the
+            point's preferred `stores_graph` identity link (see `stored_graphs`),
+            else `None`. Computed on each read. Setting it marks the row dirty, so
+            the next flush regenerates the graph identities from it.
     """
 
     __tablename__ = "stationary_point"
@@ -765,6 +773,61 @@ class StationaryPointRow(SQLModel, table=True):
     stages: list["StageRow"] = Relationship(
         link_model=StageStationaryLink, sa_relationship_kwargs={"viewonly": True}
     )
+
+    def __init__(self, *, graph: AnyGraph | None = None, **data: object) -> None:
+        """Create a stationary point, with an optional input `graph`."""
+        super().__init__(**data)
+        self.graph = graph
+
+    @property
+    def graph(self) -> AnyGraph | None:
+        """The pending input graph, else the stored one, else `None`."""
+        pending = self.pending_graph
+        if pending is not None:
+            return pending
+        return next(iter(self.stored_graphs().values()), None)
+
+    @graph.setter
+    def graph(self, value: AnyGraph | None) -> None:
+        info = inspect(self).info
+        if value is None:
+            info.pop("graph", None)
+            return
+        info["graph"] = value
+        flag_dirty(self)
+
+    @property
+    def pending_graph(self) -> AnyGraph | None:
+        """The graph set since the last flush, which the next flush consumes."""
+        return inspect(self).info.get("graph")
+
+    def clear_pending_graph(self) -> None:
+        """Drop the pending input graph (done after a successful flush)."""
+        inspect(self).info.pop("graph", None)
+
+    def stored_graphs(self) -> dict[str, AnyGraph]:
+        """The graphs rebuilt from this point's `stores_graph` links, by algorithm.
+
+        Each is the stored canonical graph relabelled by the inverse of the link's
+        `atom_map`, so it is index-aligned with the geometry. Ordered by preference:
+        by kind (`IdentityKind.graph_preference`: `low_t_stereoisomer`, then down
+        the ladder), then by algorithm name.
+        """
+        found: list[tuple[int, str, str, list[int]]] = []
+        for link in self.identity_links:
+            ident = link.identity
+            alg = None if ident is None else ident.algorithm
+            if alg is None or not alg.stores_graph or link.atom_map is None:
+                continue
+            preference = IdentityKind(alg.kind).graph_preference
+            found.append((preference, alg.name, ident.value, link.atom_map))
+        graphs: dict[str, AnyGraph] = {}
+        for _, name, value, atom_map in sorted(found, key=lambda t: t[:2]):
+            inverse = [0] * len(atom_map)  # inverse[geometry index] = canonical index
+            for k, i in enumerate(atom_map):
+                inverse[i] = k
+            graphs[name] = relabel(from_json(value), inverse)  # ty: ignore[invalid-argument-type]
+        return graphs
 
 
 # 3. Reaction network rows
@@ -928,6 +991,8 @@ class IdentityAlgorithmRow(SQLModel, table=True):
         kind: Category of identifier produced (e.g. ``stereoisomer``, ``formula``).
         parent_algorithm_name: Foreign key to the parent algorithm, whose identity
             disambiguates this one's `other_geos`, if any.
+        stores_graph: Whether the algorithm's value is the canonical graph, from
+            which the point's `graph` is rebuilt (see `IdentityAlgorithm`).
     """
 
     __tablename__ = "identity_algorithm"
@@ -938,6 +1003,7 @@ class IdentityAlgorithmRow(SQLModel, table=True):
     parent_algorithm_name: str | None = _fk_field(
         "identity_algorithm.name", nullable=True, index=False
     )
+    stores_graph: bool = False
 
     parent_algorithm: "IdentityAlgorithmRow" = Relationship(
         sa_relationship_kwargs={

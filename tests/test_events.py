@@ -7,7 +7,9 @@ from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
+import autogeom
 import numpy as np
+import protomol
 import pytest
 from autogeom import Geometry, ureg
 from protomol import AnyGraph
@@ -25,6 +27,7 @@ from autostorage import (
     ModelHashKind,
     ModelHashProtocol,
     StationaryOrderWarning,
+    events,
 )
 from autostorage.database import Database
 from autostorage.events import MAX_MODEL_HASH_LENGTH
@@ -51,7 +54,9 @@ from autostorage.models import (
 # Test data constants
 NDIM_2 = 2
 NDIM_3 = 3
-EXPECTED_IDENTITY_COUNT = 4
+NON_GRAPH_IDENTITY_COUNT = 4
+"""The built-in identities of a minimum, other than `protomol_graph@0`."""
+EXPECTED_IDENTITY_COUNT = NON_GRAPH_IDENTITY_COUNT + 1
 NATOMS_THREE = 3
 NATOMS_TWO = 2
 N_BUILTIN_HASHES = 2  # minimal@1 and exact@1
@@ -1713,7 +1718,10 @@ class TestOrderRestrictedIdentities:
         make_calculation: Callable[[], CalculationRow],
         make_geometry_water: Callable[[], GeometryRow],
     ) -> None:
-        """Changing `order` adds or removes the order-restricted identities."""
+        """Changing `order` adds or removes the order-restricted identities.
+
+        The graph identity stays: the graph is kept on an order change.
+        """
         with database.session() as session:
             stp = StationaryPointRow(
                 geometry=make_geometry_water(), calculation=make_calculation()
@@ -1725,7 +1733,7 @@ class TestOrderRestrictedIdentities:
             stp.order = 1
             session.commit()
             names = {i.algorithm.name for i in _identities(stp)}
-            assert names == {"hill_formula"}
+            assert names == {"hill_formula", "protomol_graph@0"}
 
             stp.order = 0
             session.commit()
@@ -1775,6 +1783,406 @@ class TestListenerScope:
             session.commit()
 
             assert stp.identity_links == []
+
+
+def _atom_count_graph_identity_fn(
+    geo: Geometry,  # noqa: ARG001
+    gra: AnyGraph | None = None,
+    other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
+) -> str:
+    """A fake graph identity: the graph's atom count."""
+    assert gra is not None
+    return str(len(gra.symbols))
+
+
+@pytest.fixture
+def graph_database(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Database]:
+    """A database with a second graph algorithm, besides `protomol_graph@0`."""
+    monkeypatch.setattr(
+        IdentityAlgorithmRegistry,
+        "algorithms",
+        list(IdentityAlgorithmRegistry.algorithms),
+    )
+    IdentityAlgorithmRegistry.register(
+        name="atom_count_graph",
+        kind=IdentityKind.GRAPH,
+        identity_fn=_atom_count_graph_identity_fn,
+        uses_graph=True,
+    )
+    with Database(db_path) as db:
+        yield db
+
+
+@pytest.fixture
+def count_perceptions(monkeypatch: pytest.MonkeyPatch) -> list[Geometry]:
+    """Record the geometries whose graph the listener perceives."""
+    calls: list[Geometry] = []
+
+    def _from_geometry(geo: Geometry) -> protomol.StereoMolGraph:
+        calls.append(geo)
+        return protomol.from_geometry(geo)
+
+    monkeypatch.setattr(events, "from_geometry", _from_geometry)
+    return calls
+
+
+def _graph_identity_names(stp: StationaryPointRow) -> set[str]:
+    """The names of the graph identities of `stp`."""
+    return {i.algorithm.name for i in _identities(stp) if i.algorithm.kind == "graph"}
+
+
+def _builtin_values(stp: StationaryPointRow) -> dict[str, str]:
+    """The built-in identity values of `stp`, by algorithm name."""
+    return {
+        i.algorithm.name: i.value
+        for i in _identities(stp)
+        if i.algorithm.kind != "graph"
+    }
+
+
+class TestGraphIdentities:
+    """Graph identities read the given or perceived graph."""
+
+    def test_given_graph(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        count_perceptions: list[Geometry],
+    ) -> None:
+        """A point given a graph gets graph identities of that graph."""
+        gra = protomol.examples.species()
+        geo = GeometryRow(**protomol.embed(gra).model_dump())
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=geo, calculation=make_calculation(), graph=gra
+            )
+            assert stp.graph is gra
+            session.add(stp)
+            session.commit()
+
+            link = _link_for_algorithm(stp, "protomol_graph@0")
+            assert link.identity.value == protomol.canonical_json(gra)
+            assert link.atom_map is not None
+            canonical = protomol.from_json(link.identity.value)
+            inverse = np.argsort(link.atom_map).tolist()
+            assert protomol.relabel(canonical, inverse) == gra  # ty: ignore[invalid-argument-type]
+            count = _identity_for_algorithm(stp, "atom_count_graph").value
+            assert count == str(len(gra.symbols))
+            assert count_perceptions == []
+
+    def test_order0_perceives_graph_once(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+        count_perceptions: list[Geometry],
+    ) -> None:
+        """A minimum without a graph gets the perceived one, perceived once."""
+        geo = make_geometry_water()
+        with graph_database.session() as session:
+            stp = StationaryPointRow(geometry=geo, calculation=make_calculation())
+            session.add(stp)
+            session.commit()
+
+            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+            assert value == protomol.canonical_json(protomol.from_geometry(geo))
+            assert _identity_for_algorithm(stp, "atom_count_graph").value == "3"
+            assert len(count_perceptions) == 1
+            assert stp.graph == protomol.from_geometry(geo)
+
+    def test_order1_without_graph_skips(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+        count_perceptions: list[Geometry],
+    ) -> None:
+        """A saddle point without a graph gets no graph identities."""
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation(), order=1
+            )
+            session.add(stp)
+            session.commit()
+
+            assert _graph_identity_names(stp) == set()
+            assert {i.algorithm.name for i in _identities(stp)} == {"hill_formula"}
+            assert count_perceptions == []
+
+    def test_order1_with_reaction_graph(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """A saddle point given a reaction graph gets graph identities."""
+        ts_gra = protomol.examples.abstraction_ts()
+        geo = GeometryRow(**protomol.embed(protomol.reactants(ts_gra)).model_dump())
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=geo, calculation=make_calculation(), order=1, graph=ts_gra
+            )
+            session.add(stp)
+            session.commit()
+
+            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+            assert value == protomol.canonical_json(ts_gra)
+
+    def test_builtins_unchanged(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """The built-in identities are the same with or without a graph."""
+        gra = protomol.examples.species()
+        geo = protomol.embed(gra)
+        with graph_database.session() as session:
+            with_graph = StationaryPointRow(
+                geometry=GeometryRow(**geo.model_dump()),
+                calculation=make_calculation(),
+                graph=gra,
+            )
+            session.add(with_graph)
+            session.commit()
+            without = StationaryPointRow(
+                geometry=GeometryRow(**autogeom.translate(geo, [1, 0, 0]).model_dump()),
+                calculation=make_calculation(),
+            )
+            session.add(without)
+            session.commit()
+
+            assert len(_builtin_values(with_graph)) == NON_GRAPH_IDENTITY_COUNT
+            assert _builtin_values(with_graph) == _builtin_values(without)
+
+    def test_perception_failure_warns(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If no graph can be perceived, the graph identities are skipped."""
+
+        def _fail(geo: Geometry) -> protomol.StereoMolGraph:  # noqa: ARG001
+            msg = "no Lewis structure"
+            raise protomol.GraphError(msg)
+
+        monkeypatch.setattr(events, "from_geometry", _fail)
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            with pytest.warns(IdentityGenerationWarning, match="no graph perceived"):
+                session.commit()
+
+            assert _graph_identity_names(stp) == set()
+            assert len(_identities(stp)) == NON_GRAPH_IDENTITY_COUNT
+
+    def test_preferred_stored_graph_by_kind(
+        self,
+        db_path: Path,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """With several `stores_graph` links, the kind decides, before the name."""
+        monkeypatch.setattr(
+            IdentityAlgorithmRegistry,
+            "algorithms",
+            list(IdentityAlgorithmRegistry.algorithms),
+        )
+
+        def _bondless_fn(
+            geo: Geometry,  # noqa: ARG001
+            gra: AnyGraph | None = None,
+            other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
+        ) -> IdentityResult:
+            assert gra is not None
+            bare = protomol.StereoMolGraph(symbols=gra.symbols, bonds=[])
+            canonical, atom_map = protomol.canonical_form(bare)
+            return IdentityResult(protomol.to_json(canonical), atom_map=atom_map)
+
+        # Sorts after `protomol_graph@0` by name, but its kind is preferred
+        IdentityAlgorithmRegistry.register(
+            name="z_bondless@1",
+            kind=IdentityKind.STEREOISOMER,
+            identity_fn=_bondless_fn,
+            stores_graph=True,
+        )
+        with Database(db_path) as db, db.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+            assert list(stp.stored_graphs()) == ["z_bondless@1", "protomol_graph@0"]
+            assert stp.graph == protomol.StereoMolGraph(
+                symbols=["O", "H", "H"], bonds=[]
+            )
+
+    def test_graph_survives_new_session(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """The graph is read back from the `stores_graph` link in a new session."""
+        gra = protomol.examples.species()
+        geo = protomol.embed(gra).relabel_atoms([2, 0, 1, *range(3, len(gra.symbols))])
+        gra = protomol.relabel(gra, [2, 0, 1, *range(3, len(gra.symbols))])
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=GeometryRow(**geo.model_dump()),
+                calculation=make_calculation(),
+                graph=gra,
+            )
+            session.add(stp)
+            session.commit()
+            assert stp.pending_graph is None
+            stp_id = stp.id
+        with graph_database.session() as session:
+            stp = session.get(StationaryPointRow, stp_id)
+            assert stp is not None
+            assert stp.pending_graph is None
+            assert stp.graph == gra
+            assert set(stp.stored_graphs()) == {"protomol_graph@0"}
+
+    def test_no_stores_graph_link(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A point without a `stores_graph` link has no graph."""
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation(), order=1
+            )
+            session.add(stp)
+            session.commit()
+            assert stp.graph is None
+            assert stp.stored_graphs() == {}
+
+    def test_ts_keeps_graph_on_same_atoms(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """A TS keeps its graph for a new geometry with the same atoms, not others."""
+        ts_gra = protomol.examples.abstraction_ts()
+        geo = protomol.embed(protomol.reactants(ts_gra))
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=GeometryRow(**geo.model_dump()),
+                calculation=make_calculation(),
+                order=1,
+                graph=ts_gra,
+            )
+            session.add(stp)
+            session.commit()
+            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+
+            stp.geometry = GeometryRow(
+                **autogeom.translate(geo, [1, 0, 0]).model_dump()
+            )
+            session.commit()
+            assert _identity_for_algorithm(stp, "protomol_graph@0").value == value
+            assert _identity_for_algorithm(stp, "atom_count_graph").value == str(
+                len(ts_gra.symbols)
+            )
+            assert stp.graph == ts_gra
+
+            # Different symbols (or order): the TS can't keep its graph
+            n = len(geo.symbols)
+            stp.geometry = GeometryRow(
+                **geo.relabel_atoms([n - 1, *range(n - 1)]).model_dump()
+            )
+            session.commit()
+            assert _graph_identity_names(stp) == set()
+            assert stp.graph is None
+
+    def test_order_change_keeps_graph(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        count_perceptions: list[Geometry],
+    ) -> None:
+        """A given graph is kept when only `order` changes, and not re-perceived."""
+        gra = protomol.examples.species()
+        geo = GeometryRow(**protomol.embed(gra).model_dump())
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=geo, calculation=make_calculation(), graph=gra
+            )
+            session.add(stp)
+            session.commit()
+            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+
+            stp.order = 1
+            session.commit()
+            assert _identity_for_algorithm(stp, "protomol_graph@0").value == value
+            assert stp.graph == gra
+            assert count_perceptions == []
+
+    def test_new_graph_changes_only_graph_links(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A new graph on a stored point regenerates only its graph identities."""
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+            before = {link.identity.algorithm_name: link for link in stp.identity_links}
+            old_graph_id = before["protomol_graph@0"].identity_id
+
+            # Water given as two fragments: O-H and H
+            new_gra = protomol.StereoMolGraph(symbols=["O", "H", "H"], bonds=[(0, 1)])
+            stp.graph = new_gra
+            assert stp in session.dirty
+            assert stp.graph == new_gra
+            session.commit()
+
+            after = {link.identity.algorithm_name: link for link in stp.identity_links}
+            assert set(after) == set(before)
+            for name in ("rdkit_inchi", "rdkit_inchi_conn", "rdkit_smiles"):
+                assert after[name] is before[name]
+            assert (
+                after["hill_formula"].identity_id == before["hill_formula"].identity_id
+            )
+            new_value = after["protomol_graph@0"].identity.value
+            assert new_value == protomol.canonical_json(new_gra)
+            assert after["protomol_graph@0"].identity_id != old_graph_id
+            # The old identity is kept, as identities are never deleted
+            assert session.get(IdentityRow, old_graph_id) is not None
+            assert stp.pending_graph is None
+            assert stp.graph == new_gra
+
+    def test_failed_flush_keeps_pending_graph(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A flush that fails keeps the pending graph for the next try."""
+        gra = protomol.from_geometry(make_geometry_water())
+        with graph_database.session() as session:
+            # A valid point needs a Hessian, so this flush fails
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(),
+                calculation=make_calculation(),
+                graph=gra,
+                is_validated=True,
+            )
+            session.add(stp)
+            with pytest.raises(ValueError, match="Hessian"):
+                session.flush()
+            assert stp.pending_graph is gra
 
 
 def _reversed_identity_fn(

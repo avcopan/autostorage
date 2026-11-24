@@ -14,7 +14,9 @@ from autostorage.identity import (
     IdentityAlgorithm,
     IdentityAlgorithmRegistry,
     IdentityKind,
+    IdentityResult,
     hill_formula,
+    protomol_graph,
     rdkit_inchi,
     rdkit_inchi_conn,
     rdkit_smiles,
@@ -179,6 +181,34 @@ class TestIdentityAlgorithmRegistry:
         assert hill_formula.orders is None
         builtins = (rdkit_inchi_conn, rdkit_inchi, rdkit_smiles, hill_formula)
         assert not any(alg.uses_graph for alg in builtins)
+        assert protomol_graph.kind is IdentityKind.GRAPH
+        assert protomol_graph.orders is None
+        assert protomol_graph.uses_graph
+        assert protomol_graph.stores_graph
+
+    def test_stores_graph_implies_uses_graph(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`register(stores_graph=True)` sets `uses_graph`; the dataclass checks it."""
+        monkeypatch.setattr(
+            IdentityAlgorithmRegistry,
+            "algorithms",
+            list(IdentityAlgorithmRegistry.algorithms),
+        )
+        algorithm = IdentityAlgorithmRegistry.register(
+            name="graph_copy",
+            kind=IdentityKind.GRAPH,
+            identity_fn=protomol_graph.identity_fn,
+            stores_graph=True,
+        )
+        assert algorithm.uses_graph
+        with pytest.raises(ValueError, match="must use one"):
+            IdentityAlgorithm(
+                name="bad",
+                kind=IdentityKind.GRAPH,
+                identity_fn=protomol_graph.identity_fn,
+                stores_graph=True,
+            )
 
     def test_builtins_ignore_graph(self, water: Geometry) -> None:
         """The built-in identity functions give the same value with a graph."""
@@ -249,6 +279,22 @@ class TestBuiltinIdentityFunctions:
         """Formulas are in Hill order."""
         assert hill_formula.identity_fn(water) == "H2O"
         assert hill_formula.identity_fn(methane) == "CH4"
+
+    def test_protomol_graph(self, water: Geometry) -> None:
+        """The canonical graph's JSON, and the map back to the given graph."""
+        gra = protomol.from_geometry(water)
+        result = protomol_graph.identity_fn(water, gra)
+        assert isinstance(result, IdentityResult)
+        assert result.value == protomol.canonical_json(gra)
+        assert result.atom_map is not None
+        canonical = protomol.from_json(result.value)
+        inverse = np.argsort(result.atom_map).tolist()
+        assert protomol.relabel(canonical, inverse) == gra  # ty: ignore[invalid-argument-type]
+
+    def test_protomol_graph_needs_graph(self, water: Geometry) -> None:
+        """Without a graph, `protomol_graph@0` raises a ValueError."""
+        with pytest.raises(ValueError, match="needs a graph"):
+            protomol_graph.identity_fn(water)
 
     def test_accepts_geometry_row(self, water: Geometry) -> None:
         """Identity functions accept `GeometryRow`s, including in `other_geos`."""

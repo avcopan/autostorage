@@ -19,6 +19,7 @@ autostorage registers the following algorithms itself:
 | `rdkit_inchi` | `stereoisomer` | | Standard InChI, from `autogeom.inchi` |
 | `rdkit_smiles` | `stereoisomer` | `rdkit_inchi` | SMILES, from `autogeom.smiles` |
 | `hill_formula` | `formula` | `rdkit_inchi` | Formula in Hill order, from `autogeom.formula` |
+| `protomol_graph@0` | `graph` | | The point's protomol graph, canonicalized: `protomol.to_json` of `canonical_form(gra)`, with the `atom_map` (see [Graphs](#graphs)). Interim, until `smg_low_t@1` exists |
 
 When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry or `order` changes.
 Algorithms registered with restricted `orders = {0}`, such as `rdkit_inchi_conn`, `rdkit_inchi`, and `rdkit_smiles`, are skipped for higher-order saddle points.
@@ -117,7 +118,7 @@ Identities are unique by algorithm and `value_hash` (SHA-256 of the value, `iden
 
 An identity function also receives `gra`, the protomol graph of the point, index-aligned with its geometry (atom `i` of the graph is atom `i` of the geometry), or `None`.
 The graph supplies what one geometry can't, such as the breaking and forming bonds of a transition state, or the stereo elements the user chose.
-The built-in algorithms ignore it.
+The built-in algorithms other than `protomol_graph@0` ignore it.
 
 An algorithm that reads the graph is registered with `uses_graph=True`:
 
@@ -140,6 +141,48 @@ canonical_graph = IdentityAlgorithmRegistry.register(
     uses_graph=True,
 )
 ```
+
+Pass the graph when you create the stationary point.
+It is an input, handed to the identity algorithms on flush; it is not a column of the point, but is read back from the identity layer (see [The durable graph](#the-durable-graph)).
+
+```python
+import protomol
+
+from autostorage import GeometryRow, StationaryPointRow
+
+gra = protomol.examples.species()
+geo = GeometryRow(**protomol.embed(gra).model_dump())
+stp = StationaryPointRow(geometry=geo, order=0, graph=gra)
+```
+
+Graph algorithms (those with `uses_graph=True`) are passed the graph; the others are passed `None`.
+Without a graph:
+
+- a minimum (`order == 0`) gets the graph perceived from its geometry with `protomol.from_geometry`, once per point and only if a graph algorithm applies to it;
+- a saddle point (`order != 0`) skips the graph algorithms, since its breaking and forming bonds can't be read from one geometry.
+
+If no graph can be perceived, an `IdentityGenerationWarning` is issued and the graph algorithms are skipped.
+Since `protomol_graph@0` is built in, every minimum without a graph has its graph perceived once (one Lewis-structure perception).
+
+An algorithm registered with `stores_graph=True` (which sets `uses_graph`) returns an `IdentityResult` whose value is the canonical graph (`protomol.to_json(canonical)`) and whose `atom_map` is the one from `protomol.canonical_form`.
+`protomol_graph@0` is one; the flag is mirrored into `IdentityAlgorithmRow.stores_graph`.
+
+### The durable graph
+
+A point's graph is stored through its `stores_graph` links: `stp.graph` is
+
+1. the pending input, set by `StationaryPointRow(graph=...)` or `stp.graph = gra` and consumed by the next successful flush (a failed flush keeps it);
+2. else the graph rebuilt from the point's `stores_graph` link, the canonical graph relabelled by the inverse of the link's `atom_map`, so that it is index-aligned with the geometry (`stp.stored_graphs()` gives all of them, by algorithm);
+3. else `None`.
+
+It is computed on each read, so it can't go stale.
+If a point has several `stores_graph` links, the kind decides, following the hierarchy (`IdentityKind.graph_preference`): `low_t_stereoisomer` first, then down the ladder (`stereoisomer`, `isomer`, `formula`), then `conformer`, then the off-ladder `graph`; ties go to the first by algorithm name.
+The ladder itself is `IDENTITY_KIND_LADDER`, and `IdentityKind.rank` gives a kind's place on it.
+A minimum stored without a graph gets the perceived one, so its `stp.graph` is that.
+
+- **A new graph overwrites.** Setting `stp.graph` on a stored point marks it dirty; on flush only its `uses_graph` identities are regenerated, and its other links are kept as they are. The old `IdentityRow`s stay, as identities are never deleted.
+- **A new geometry or `order`** regenerates every identity. Each `uses_graph` algorithm gets the stored graph (a `stores_graph` algorithm its own link's, else the preferred one), read before the old links are cleared. It is kept if the new geometry has the same symbols in the same order; otherwise a minimum gets a perceived graph and a saddle point skips the graph algorithms. Changing only the `order` keeps the graph.
+- Points stored before a `stores_graph` algorithm was registered have no stored graph (there is no backfill).
 
 ## Errors
 
