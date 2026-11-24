@@ -800,7 +800,7 @@ def _generate_identity(
 ) -> str | None:
     """Run `algorithm` on `geo_row`, warning and returning None on failure."""
     try:
-        value = algorithm.identity_fn(geo_row, other_geos or None)
+        value = algorithm.identity_fn(geo_row, None, other_geos or None)
     except _IDENTITY_ERRORS as err:
         reason = f"{type(err).__name__}: {err}"
     else:

@@ -39,12 +39,14 @@ with Database(":memory:") as db, db.session() as session:
 
 ## Kinds
 
-Every algorithm has an `IdentityKind` that says what sort of identity it produces: `formula`, `isomer`, `stereoisomer`, or `conformer`.
+Every algorithm has an `IdentityKind` that says what sort of identity it produces: `formula`, `isomer`, `stereoisomer`, `low_t_stereoisomer`, or `conformer`, from coarsest to finest.
+`low_t_stereoisomer` is a stereoisomer under the low-temperature stereo scheme, which also tells apart configurations that interconvert only at high temperature (such as an inverting N).
+The `graph` kind is for a user-registered graph scheme, which may be coarser or finer than `low_t_stereoisomer` and so has no place on that ladder.
 This lets code select algorithms by kind without naming a specific one.
 
 ## Parents and `other_geos`
 
-An identity function has the signature `(geo, other_geos=None) -> str`.
+An identity function has the signature `(geo, gra=None, other_geos=None) -> str`, where `gra` is the point's protomol graph (see [Graphs](#graphs)).
 For an algorithm with a `parent`, `other_geos` holds one geometry per existing identity value among the stationary points that share this geometry's *parent* identity.
 The function can then return one of those existing values instead of making a new one.
 
@@ -62,12 +64,15 @@ from collections.abc import Mapping
 import autogeom
 import numpy as np
 from autogeom import Geometry
+from protomol import AnyGraph
 
 from autostorage import Database, IdentityAlgorithmRegistry, IdentityKind, rdkit_inchi
 
 
 def rmsd_conformer_identity_fn(
-    geo: Geometry, other_geos: Mapping[str, Geometry] | None = None
+    geo: Geometry,
+    gra: AnyGraph | None = None,
+    other_geos: Mapping[str, Geometry] | None = None,
 ) -> str:
     """Reuse the label of an existing conformer within 0.1 Å RMSD, or make a new one."""
     for label, other_geo in (other_geos or {}).items():
@@ -94,6 +99,36 @@ db.close()
 
 Algorithm names must be unique: registering a name twice raises a `ValueError`.
 `IdentityAlgorithmRegistry.get(name)` returns a registered algorithm, and `IdentityAlgorithmRegistry.algorithms` lists them all.
+
+## Graphs
+
+An identity function also receives `gra`, the protomol graph of the point, index-aligned with its geometry (atom `i` of the graph is atom `i` of the geometry), or `None`.
+The graph supplies what one geometry can't, such as the breaking and forming bonds of a transition state, or the stereo elements the user chose.
+The built-in algorithms ignore it.
+
+An algorithm that reads the graph is registered with `uses_graph=True`:
+
+```python
+import protomol
+
+def canonical_graph_identity_fn(
+    geo: Geometry,
+    gra: AnyGraph | None = None,
+    other_geos: Mapping[str, Geometry] | None = None,
+) -> str:
+    """The canonical JSON of the graph."""
+    return protomol.canonical_json(gra)
+
+
+canonical_graph = IdentityAlgorithmRegistry.register(
+    name="canonical_graph",
+    kind=IdentityKind.GRAPH,
+    identity_fn=canonical_graph_identity_fn,
+    uses_graph=True,
+)
+```
+
+## Errors
 
 An identity function should raise `ValueError`, `NotImplementedError`, or `autogeom.GeometryConversionError` for a geometry it cannot handle; these are reported as an `IdentityGenerationWarning`.
 

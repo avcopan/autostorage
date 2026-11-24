@@ -116,7 +116,11 @@ class IdentityKind(StrEnum):
     FORMULA = "formula"
     ISOMER = "isomer"
     STEREOISOMER = "stereoisomer"
+    LOW_T_STEREOISOMER = "low_t_stereoisomer"
+    """Stereoisomer under the low-temperature LS scheme (finer than `STEREOISOMER`)."""
     CONFORMER = "conformer"
+    GRAPH = "graph"
+    """A user-registered graph scheme; not on the coarse-to-fine ladder."""
 
 
 class ModelHashKind(StrEnum):

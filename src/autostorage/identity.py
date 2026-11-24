@@ -5,6 +5,7 @@ from typing import ClassVar, Protocol, Self, runtime_checkable
 
 import autogeom
 from autogeom import Geometry
+from protomol import AnyGraph
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from .types import IdentityKind
@@ -28,8 +29,17 @@ type OtherGeometries = Mapping[str, Geometry] | None
 class IdentityProtocol(Protocol):
     """Protocol for identity functions."""
 
-    def __call__(self, geo: Geometry, other_geos: OtherGeometries = None) -> str:
-        """Generate the identity of `geo`, given peer geometries keyed by identity."""
+    def __call__(
+        self,
+        geo: Geometry,
+        gra: AnyGraph | None = None,
+        other_geos: OtherGeometries = None,
+    ) -> str:
+        """Generate the identity of `geo`, given its graph and peer geometries.
+
+        `gra` is the protomol graph of `geo`, index-aligned with it, or `None`.
+        `other_geos` holds peer geometries keyed by their identity value.
+        """
         ...
 
 
@@ -39,11 +49,15 @@ class IdentityAlgorithm(BaseModel):
     Attributes:
         name: Unique algorithm name (mirrored into `IdentityAlgorithmRow`).
         kind: Category of identity produced.
-        identity_fn: ``(geo, other_geos=None) -> str``, generating the identity.
+        identity_fn: ``(geo, gra=None, other_geos=None) -> str``, generating the
+            identity.
         parent: Algorithm whose identity selects the `other_geos` passed to
             `identity_fn`, if any.
         orders: Stationary point orders the algorithm applies to. `None` if it
             applies to any order.
+        uses_graph: Whether `identity_fn` reads `gra`. Such an algorithm is passed
+            the point's graph, perceived from the geometry for a minimum, and is
+            skipped for a saddle point without one.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
@@ -53,6 +67,7 @@ class IdentityAlgorithm(BaseModel):
     identity_fn: IdentityProtocol
     parent: "IdentityAlgorithm | None" = None
     orders: frozenset[int] | None = None
+    uses_graph: bool = False
 
     def applies_to(self, order: int) -> bool:
         """Check whether algorithm applies to a given order."""
@@ -83,7 +98,7 @@ class IdentityAlgorithmRegistry:
     algorithms: ClassVar[list[IdentityAlgorithm]] = []
 
     @classmethod
-    def register(
+    def register(  # noqa: PLR0913
         cls,
         name: str,
         kind: IdentityKind,
@@ -91,6 +106,7 @@ class IdentityAlgorithmRegistry:
         *,
         parent: IdentityAlgorithm | None = None,
         orders: Iterable[int] | None = None,
+        uses_graph: bool = False,
     ) -> IdentityAlgorithm:
         """Create and register an identity algorithm.
 
@@ -106,6 +122,8 @@ class IdentityAlgorithmRegistry:
                 among the stationary points that share the parent identity.
             orders: Stationary point orders the algorithm applies to. `None` if it
                 applies to any order.
+            uses_graph: Whether `identity_fn` reads its `gra` argument. Graphs are
+                only perceived for points that such an algorithm applies to.
 
         Raises:
             ValueError: If an algorithm named `name` is already registered, or
@@ -116,7 +134,12 @@ class IdentityAlgorithmRegistry:
             raise ValueError(msg)
         orders = None if orders is None else frozenset(orders)
         algorithm = IdentityAlgorithm(
-            name=name, kind=kind, identity_fn=identity_fn, parent=parent, orders=orders
+            name=name,
+            kind=kind,
+            identity_fn=identity_fn,
+            parent=parent,
+            orders=orders,
+            uses_graph=uses_graph,
         )
         cls.algorithms.append(algorithm)
         return algorithm
@@ -138,6 +161,7 @@ class IdentityAlgorithmRegistry:
 
 def rdkit_inchi_conn_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate a connectivity InChI string with RDKit."""
@@ -155,6 +179,7 @@ rdkit_inchi_conn = IdentityAlgorithmRegistry.register(
 
 def rdkit_inchi_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate a standard InChI string with RDKit."""
@@ -170,7 +195,11 @@ rdkit_inchi = IdentityAlgorithmRegistry.register(
 """Standard InChI from RDKit (kind: stereoisomer; minima only)."""
 
 
-def rdkit_smiles_identity_fn(geo: Geometry, other_geos: OtherGeometries = None) -> str:
+def rdkit_smiles_identity_fn(
+    geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
+    other_geos: OtherGeometries = None,
+) -> str:
     """Generate a SMILES string with RDKit.
 
     If a geometry in `other_geos` has the same InChI, its SMILES key is returned,
@@ -200,6 +229,7 @@ The SMILES of an existing stationary point with the same InChI is reused.
 
 def hill_formula_identity_fn(
     geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
     other_geos: OtherGeometries = None,  # noqa: ARG001
 ) -> str:
     """Generate the molecular formula in Hill order."""
