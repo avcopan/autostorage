@@ -68,7 +68,7 @@ layers = [
     "autostorage.database",
     "autostorage.events",
     "autostorage.query",
-    "autostorage.property | autostorage.identity",
+    "autostorage.property | autostorage.identity | autostorage.model_hash",
     "autostorage.models",
     "autostorage.domain",
     "autostorage.types",

@@ -2,7 +2,7 @@
 
 __version__ = "0.0.23"
 
-from . import domain, events, identity, query, types
+from . import domain, events, identity, model_hash, query, types
 from .database import Database
 from .domain import Calculation, Model
 from .events import (
@@ -18,6 +18,11 @@ from .identity import (
     rdkit_inchi,
     rdkit_inchi_conn,
     rdkit_smiles,
+)
+from .model_hash import (
+    ModelHashAlgorithm,
+    ModelHashAlgorithmRegistry,
+    ModelHashProtocol,
 )
 from .models import (
     CalculationGeometryLink,
@@ -49,7 +54,7 @@ from .property import (
     gradient_property_kind,
     hessian_property_kind,
 )
-from .types import AxisKind, IdentityKind, Role
+from .types import AxisKind, IdentityKind, ModelHashKind, Role
 
 __all__ = [
     "AutostorageSession",
@@ -70,6 +75,10 @@ __all__ = [
     "IdentityRow",
     "IdentityStationaryLink",
     "Model",
+    "ModelHashAlgorithm",
+    "ModelHashAlgorithmRegistry",
+    "ModelHashKind",
+    "ModelHashProtocol",
     "ModelRow",
     "PropertyKind",
     "PropertyKindRegistry",
@@ -94,6 +103,7 @@ __all__ = [
     "hessian_property_kind",
     "hill_formula",
     "identity",
+    "model_hash",
     "query",
     "rdkit_inchi",
     "rdkit_inchi_conn",

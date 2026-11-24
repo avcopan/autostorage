@@ -15,6 +15,7 @@ __all__ = [
     "CompressedArrayTypeDecorator",
     "CompressedJSONTypeDecorator",
     "IdentityKind",
+    "ModelHashKind",
     "Role",
 ]
 
@@ -116,6 +117,14 @@ class IdentityKind(StrEnum):
     ISOMER = "isomer"
     STEREOISOMER = "stereoisomer"
     CONFORMER = "conformer"
+
+
+class ModelHashKind(StrEnum):
+    """How fine-grained a model hash is."""
+
+    MINIMAL = "minimal"  # method + basis
+    FINE = "fine"  # plus the keywords that change the result, per program
+    EXACT = "exact"  # everything, as given
 
 
 class AxisKind(StrEnum):
