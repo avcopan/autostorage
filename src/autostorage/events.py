@@ -24,7 +24,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Mapper, UOWTransaction, aliased
 from sqlmodel import Session, col, select
 
-from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry
+from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry, IdentityResult
 from .model_hash import ModelHashAlgorithm, ModelHashAlgorithmRegistry
 from .models import (
     GeometryRow,
@@ -222,7 +222,7 @@ def _link_stage(session: Session, link: StageStationaryLink) -> StageRow | None:
 
 
 def _link_point(
-    session: Session, link: StageStationaryLink
+    session: Session, link: StageStationaryLink | IdentityStationaryLink
 ) -> StationaryPointRow | None:
     """Return the stationary point of `link`, via its relationship or foreign key."""
     if link.stationary is not None:
@@ -805,20 +805,44 @@ def _sibling_geometries(
     return siblings
 
 
+def _is_permutation(atom_map: object, natoms: int) -> bool:
+    """Return whether `atom_map` lists the indices ``0..natoms-1`` in any order."""
+    if not isinstance(atom_map, (list, tuple)):
+        return False
+    if not all(isinstance(i, int) and not isinstance(i, bool) for i in atom_map):
+        return False
+    return sorted(atom_map) == list(range(natoms))
+
+
 def _generate_identity(
     algorithm: IdentityAlgorithm,
     geo_row: GeometryRow,
     other_geos: dict[str, GeometryRow] | None,
-) -> str | None:
-    """Run `algorithm` on `geo_row`, warning and returning None on failure."""
+) -> IdentityResult | None:
+    """Run `algorithm` on `geo_row`, warning and returning None on failure.
+
+    An empty value, or an `atom_map` that isn't a permutation of the geometry's
+    atoms, also counts as a failure.
+    """
     try:
-        value = algorithm.identity_fn(geo_row, None, other_geos or None)
+        result = algorithm.identity_fn(geo_row, None, other_geos or None)
     except _IDENTITY_ERRORS as err:
         reason = f"{type(err).__name__}: {err}"
     else:
-        if value:
-            return value
-        reason = "empty identity value."
+        if not isinstance(result, IdentityResult):
+            result = IdentityResult(result)
+        atom_map = result.atom_map
+        if not result.value:
+            reason = "empty identity value."
+        elif atom_map is not None and not _is_permutation(
+            list(atom_map), geo_row.atom_count
+        ):
+            reason = (
+                f"atom_map {list(atom_map)} is not a permutation of the "
+                f"{geo_row.atom_count} atoms."
+            )
+        else:
+            return result
     msg = f"Skipping {algorithm.name!r} identity for GeometryRow {geo_row.id}: {reason}"
     warnings.warn(msg, IdentityGenerationWarning, stacklevel=2)
     return None
@@ -850,13 +874,18 @@ def _attach_identities(ctx: _IdentityFlushContext, obj: StationaryPointRow) -> N
         if parent_key is not None:
             other_geos = _sibling_geometries(ctx, obj, name, parent_key)
 
-        value = _generate_identity(algorithm, geo_row, other_geos)
-        if value is None:
+        result = _generate_identity(algorithm, geo_row, other_geos)
+        if result is None:
             continue
 
+        value = result.value
         ident = _get_or_create_identity(ctx, name, value)
         if all(link.identity is not ident for link in obj.identity_links):
-            obj.identity_links.append(IdentityStationaryLink(identity=ident))
+            atom_map = None if result.atom_map is None else list(result.atom_map)
+            link = IdentityStationaryLink(
+                identity=ident, atom_map=atom_map, algorithm_cache=result.cache
+            )
+            obj.identity_links.append(link)
         keys[name] = (name, value)
         if parent_key is not None:
             pending = ctx.pending_siblings.setdefault((parent_key, name), {})
@@ -900,6 +929,46 @@ def add_registry_identities_before_flush(
         obj.identity_links.clear()
     for obj in new + changed:
         _attach_identities(ctx, obj)
+
+
+def _link_algorithm_name(session: Session, link: IdentityStationaryLink) -> str | None:
+    """Return the algorithm name of `link`'s identity, via relationship or key."""
+    ident = link.identity
+    if ident is None and link.identity_id is not None:
+        ident = session.get(IdentityRow, link.identity_id)
+    return None if ident is None else ident.algorithm_name
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_identity_atom_maps_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Check that a new or changed link's `atom_map` permutes its point's atoms.
+
+    Raises:
+        ValueError: If an `atom_map` isn't a permutation of the point geometry's
+            atom indices.
+    """
+    for link in _pending(session, IdentityStationaryLink):
+        if link.atom_map is None:
+            continue
+        if link not in session.new and not _has_changes(link, "atom_map"):
+            continue
+        point = _link_point(session, link)
+        if point is None:
+            continue
+        geo_row = _resolve_geometry(session, point)
+        if geo_row is None or _is_permutation(link.atom_map, geo_row.atom_count):
+            continue
+        algorithm_name = _link_algorithm_name(session, link)
+        msg = (
+            f"atom_map {link.atom_map} of the {algorithm_name!r} identity of "
+            f"StationaryPointRow {point.id} is not a permutation of its "
+            f"{geo_row.atom_count} atoms."
+        )
+        raise ValueError(msg)
 
 
 @dataclass

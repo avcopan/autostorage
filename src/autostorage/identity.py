@@ -1,8 +1,8 @@
 """Identity algorithm registry with default definitions."""
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 import autogeom
 from autogeom import Geometry
@@ -15,6 +15,7 @@ __all__ = [
     "IdentityAlgorithmRegistry",
     "IdentityKind",
     "IdentityProtocol",
+    "IdentityResult",
     "hill_formula",
     "rdkit_inchi",
     "rdkit_inchi_conn",
@@ -23,6 +24,23 @@ __all__ = [
 
 # `Mapping` is covariant in its values, so `dict[str, GeometryRow]` is accepted
 type OtherGeometries = Mapping[str, Geometry] | None
+
+
+@dataclass(frozen=True)
+class IdentityResult:
+    """An identity value with per-point data, returned by an identity function.
+
+    Attributes:
+        value: The identity value.
+        atom_map: ``atom_map[k]`` is the geometry index of canonical atom ``k``, for
+            an identity built from a canonical form. Stored on the point's link
+            and checked on flush to be a permutation of the geometry's atoms.
+        cache: Algorithm-specific data, stored in the link's `algorithm_cache`.
+    """
+
+    value: str
+    atom_map: Sequence[int] | None = None
+    cache: dict[str, Any] | None = None
 
 
 @runtime_checkable
@@ -34,11 +52,12 @@ class IdentityProtocol(Protocol):
         geo: Geometry,
         gra: AnyGraph | None = None,
         other_geos: OtherGeometries = None,
-    ) -> str:
+    ) -> str | IdentityResult:
         """Generate the identity of `geo`, given its graph and peer geometries.
 
         `gra` is the protomol graph of `geo`, index-aligned with it, or `None`.
-        `other_geos` holds peer geometries keyed by their identity value.
+        `other_geos` holds peer geometries keyed by their identity value. Return
+        the value, or an `IdentityResult` to also store an atom map or a cache.
         """
         ...
 
@@ -50,8 +69,8 @@ class IdentityAlgorithm:
     Attributes:
         name: Unique algorithm name (mirrored into `IdentityAlgorithmRow`).
         kind: Category of identity produced.
-        identity_fn: ``(geo, gra=None, other_geos=None) -> str``, generating the
-            identity.
+        identity_fn: ``(geo, gra=None, other_geos=None) -> str | IdentityResult``,
+            generating the identity.
         parent: Algorithm whose identity selects the `other_geos` passed to
             `identity_fn`, if any.
         orders: Stationary point orders the algorithm applies to. `None` if it

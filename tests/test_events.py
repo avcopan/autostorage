@@ -3,18 +3,22 @@
 import itertools
 import tempfile
 import uuid
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Mapping
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
-from autogeom import ureg
+from autogeom import Geometry, ureg
+from protomol import AnyGraph
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from autostorage import (
+    IdentityAlgorithmRegistry,
     IdentityGenerationWarning,
+    IdentityKind,
+    IdentityResult,
     ModelHashAlgorithm,
     ModelHashAlgorithmRegistry,
     ModelHashGenerationWarning,
@@ -1771,6 +1775,105 @@ class TestListenerScope:
             session.commit()
 
             assert stp.identity_links == []
+
+
+def _reversed_identity_fn(
+    geo: Geometry,
+    gra: AnyGraph | None = None,  # noqa: ARG001
+    other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
+) -> IdentityResult:
+    """A fake canonical identity: the atom count, with the atoms reversed."""
+    natoms = geo.atom_count
+    atom_map = list(reversed(range(natoms)))
+    return IdentityResult(str(natoms), atom_map=atom_map, cache={"natoms": natoms})
+
+
+def _bad_map_identity_fn(
+    geo: Geometry,  # noqa: ARG001
+    gra: AnyGraph | None = None,  # noqa: ARG001
+    other_geos: Mapping[str, Geometry] | None = None,  # noqa: ARG001
+) -> IdentityResult:
+    """A broken identity whose atom map repeats an atom."""
+    return IdentityResult("bad", atom_map=[0, 0, 1])
+
+
+@pytest.fixture
+def result_database(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Database]:
+    """A database with algorithms returning a good and a bad `IdentityResult`."""
+    monkeypatch.setattr(
+        IdentityAlgorithmRegistry,
+        "algorithms",
+        list(IdentityAlgorithmRegistry.algorithms),
+    )
+    IdentityAlgorithmRegistry.register(
+        name="reversed@1", kind=IdentityKind.FORMULA, identity_fn=_reversed_identity_fn
+    )
+    IdentityAlgorithmRegistry.register(
+        name="bad_map@1", kind=IdentityKind.FORMULA, identity_fn=_bad_map_identity_fn
+    )
+    with Database(db_path) as db:
+        yield db
+
+
+class TestIdentityResult:
+    """An `IdentityResult` sets the link's `atom_map` and `algorithm_cache`."""
+
+    def test_atom_map_and_cache(
+        self,
+        result_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A good result is stored on the link; a bad atom map skips the identity."""
+        with result_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            with pytest.warns(IdentityGenerationWarning, match="not a permutation"):
+                session.commit()
+            session.expire_all()
+
+            link = _link_for_algorithm(stp, "reversed@1")
+            assert link.identity.value == "3"
+            assert link.atom_map == [2, 1, 0]
+            assert link.algorithm_cache == {"natoms": 3}
+            names = {i.algorithm_name for i in _identities(stp)}
+            assert "bad_map@1" not in names
+            assert link.identity.algorithm_cache is None
+            # A plain-string identity has neither
+            formula = _link_for_algorithm(stp, "hill_formula")
+            assert formula.atom_map is None
+            assert formula.algorithm_cache is None
+
+    @pytest.mark.parametrize("atom_map", [[0, 1], [0, 1, 3], [0, 0, 1]])
+    def test_bad_atom_map_written_directly_raises(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+        atom_map: list[int],
+    ) -> None:
+        """An atom map that doesn't permute the point's atoms fails the flush."""
+        with database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+
+            link = _link_for_algorithm(stp, "hill_formula")
+            link.atom_map = atom_map
+            with pytest.raises(ValueError, match=f"'hill_formula'.*{stp.id}"):
+                session.flush()
+            session.rollback()
+
+            link.atom_map = [1, 2, 0]
+            session.commit()
+            session.expire_all()
+            assert link.atom_map == [1, 2, 0]
 
 
 class TestPersistedSiblingIdentities:

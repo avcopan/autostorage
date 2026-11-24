@@ -46,7 +46,7 @@ This lets code select algorithms by kind without naming a specific one.
 
 ## Parents and `other_geos`
 
-An identity function has the signature `(geo, gra=None, other_geos=None) -> str`, where `gra` is the point's protomol graph (see [Graphs](#graphs)).
+An identity function has the signature `(geo, gra=None, other_geos=None) -> str | IdentityResult` (see [Results](#results)), where `gra` is the point's protomol graph (see [Graphs](#graphs)).
 For an algorithm with a `parent`, `other_geos` holds one geometry per existing identity value among the stationary points that share this geometry's *parent* identity.
 The function can then return one of those existing values instead of making a new one.
 
@@ -99,6 +99,19 @@ db.close()
 
 Algorithm names must be unique: registering a name twice raises a `ValueError`.
 `IdentityAlgorithmRegistry.get(name)` returns a registered algorithm, and `IdentityAlgorithmRegistry.algorithms` lists them all.
+
+## Results
+
+An identity function may return an `IdentityResult(value, atom_map=None, cache=None)` instead of a string, to store data for this point on its link (`IdentityStationaryLink`):
+
+- `atom_map`, for an identity built from a canonical form: `atom_map[k]` is the geometry index of canonical atom `k`. It is stored in the link's `atom_map` column.
+- `cache`, algorithm-specific data (automorphisms, internal-coordinate definitions), stored in the link's `algorithm_cache` as compressed JSON.
+
+Before a flush, a new or changed link's `atom_map` must be a permutation of its point geometry's atom indices.
+An algorithm that returns a bad one gets an `IdentityGenerationWarning`, and its identity is skipped; a bad one written to a link directly raises a `ValueError` naming the point and the algorithm.
+
+`IdentityRow` also has an `algorithm_cache`, for data shared by every point with that identity; nothing writes it yet.
+Identities are unique by algorithm and `value_hash` (SHA-256 of the value, `identity_value_hash`), so a value may be long, such as a canonical graph.
 
 ## Graphs
 

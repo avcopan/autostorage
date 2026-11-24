@@ -253,6 +253,14 @@ class IdentityStationaryLink(SQLModel, table=True):
     place; reassign the dict after editing nested values. Discarded with the
     link when the stationary point's geometry changes.
     """
+    atom_map: list[int] | None = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
+    """``atom_map[k]`` is the geometry index of canonical atom ``k``, or `None`.
+
+    Set from an algorithm's `IdentityResult`. Checked on flush to be a permutation
+    of the point geometry's atoms.
+    """
     stationary: "StationaryPointRow" = Relationship(back_populates="identity_links")
     """The linked `StationaryPointRow`."""
     identity: "IdentityRow" = Relationship(back_populates="stationary_links")
