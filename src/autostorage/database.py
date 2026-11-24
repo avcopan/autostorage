@@ -57,6 +57,7 @@ class Database:
             SQLModel.metadata.create_all(self.engine)
             with self.session() as seed_session:
                 events.create_identity_algorithms(seed_session)
+                events.create_model_hash_algorithms(seed_session)
                 events.create_property_kinds(seed_session)
         except BaseException:
             self.close()

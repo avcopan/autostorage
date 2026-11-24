@@ -24,12 +24,14 @@ from sqlalchemy.orm import Mapper, UOWTransaction, aliased
 from sqlmodel import Session, col, select
 
 from .identity import IdentityAlgorithm, IdentityAlgorithmRegistry
+from .model_hash import ModelHashAlgorithmRegistry
 from .models import (
     GeometryRow,
     GeometryTrajectoryLink,
     IdentityAlgorithmRow,
     IdentityRow,
     IdentityStationaryLink,
+    ModelHashAlgorithmRow,
     PropertyKindRow,
     PropertyValueRow,
     StationaryPointRow,
@@ -85,6 +87,17 @@ def create_identity_algorithms(session: Session) -> None:
             session.add(row)
         row.kind = alg.kind
         row.parent_algorithm_name = parent_name
+    session.commit()
+
+
+def create_model_hash_algorithms(session: Session) -> None:
+    """Create or update a row for every registered model hash algorithm."""
+    for alg in ModelHashAlgorithmRegistry.algorithms:
+        row = session.get(ModelHashAlgorithmRow, alg.name)
+        if row is None:
+            row = ModelHashAlgorithmRow(name=alg.name, kind=alg.kind)
+            session.add(row)
+        row.kind = alg.kind
     session.commit()
 
 
