@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+### Added
+- **Model hashes**: a registry of model hash algorithms that works like the identity registry. `ModelHashAlgorithmRegistry` and the frozen dataclass `ModelHashAlgorithm` (`name`, `kind`, `hash_fn`, `programs`; no parent, since a model's hash depends on that model alone), with the built-ins `minimal@1` (`method/basis`, lower-cased) and `exact@1` (SHA-256 of the program, method, basis, and keywords). `ModelHashKind` is `minimal`, `fine`, or `exact`. When a `Database` is opened, `model_hash_algorithm` is seeded from the registry; on flush, new `ModelRow`s get a `ModelHashRow` for every algorithm that applies to their program, and edited ones are rehashed. Failing hash functions, and empty values or values of 255 or more characters, are skipped with a `ModelHashGenerationWarning`. `query.model_by_hash(algorithm, value)` selects models by hash.
+- **`Model` and `Calculation`**: plain Pydantic classes (`autostorage.domain`) that `ModelRow` and `CalculationRow` inherit from, so a model can be built in memory and hashed with `ModelHashAlgorithm.hash` before it is stored.
+- New tables `model_hash_algorithm`, `model_hash` and `model_hash_link` (`ModelHashAlgorithmRow`, `ModelHashRow`, `ModelHashLink`). Only tables are added, so `create_all` upgrades an existing database. There is **no backfill**: models stored before this change, or before an algorithm was registered, get no hash links until their program, method, basis, or keywords change.
+
+### Changed
+- `ModelRow.keywords` holds electronic-structure keywords only; optimizer keywords belong in `CalculationRow.input_provenance`, which is recorded but never hashed. This is documented, not enforced.
 
 ## [0.0.23] - 2026-11-19
 ### Added
