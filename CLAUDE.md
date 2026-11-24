@@ -21,14 +21,15 @@ The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier 
 - A non-pseudo stationary point's `is_validated` is set on flush to whether every Hessian of its geometry has `order` negative eigenvalues (`autogeom.stationary_point_order`). A mismatch resets it with a `StationaryOrderWarning`. It is rechecked when the point or a Hessian of its geometry is added, changed, or deleted.
 - New stationary points get an `IdentityRow` for every algorithm in `IdentityAlgorithmRegistry` (`identity.py`; regenerated when the geometry or `order` changes). Failing algorithms are skipped with an `IdentityGenerationWarning`, and ones restricted by `orders` (InChIs and SMILES) are skipped when `algorithm.applies_to(order)` is `False`.
 - New `ModelRow`s get a `ModelHashRow` for every algorithm in `ModelHashAlgorithmRegistry` (`model_hash.py`) that `applies_to(program)`, and are rehashed when `program`, `method`, `basis` or `keywords` change (reassign `keywords` after a nested edit). Failing, empty or too-long (255+ characters) hashes are skipped with a `ModelHashGenerationWarning`. There is no backfill.
+- A stage is a multiset: `StageStationaryLink.count` says how many times its point occurs (A + A is one link, count 2). A new or changed stage must have a point, and a TS stage exactly one, with count 1. `StageRow.stationaries` and `StationaryPointRow.stages` are read-only; write `stationary_links`, or use `StageRow.from_points`. Deleting a point deletes its links but keeps its stages, even if they become empty.
 - `StepRow` stage IDs are sorted (`stage_id1 < stage_id2`), and `is_barrierless` must match whether there is a transition-state stage.
 - A trajectory's `ndim` is inferred from its geometry indices if unset.
 - Trajectory axes (`TrajectoryAxisRow`) are validated, and missing `GeometryTrajectoryLink.values` of distance/angle/dihedral axes are measured with autogeom (quantities are converted to the axis's units).
 
 Nothing commits automatically: call `session.commit()`.
 Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians), and `IdentityStationaryLink.identity_cache` as zlib-compressed JSON by `CompressedJSONTypeDecorator`.
-Deleting a row deletes its link rows and the data that needs it (a model's calculations and hash links; a geometry's or calculation's properties and stationary points; a calculation's validations), but not geometries, stages, steps, identities, or model hashes.
-Identities are reached through link rows (`StationaryPointRow.identity_links`, `IdentityRow.stationary_links`); removing a link from either list deletes it.
+Deleting a row deletes its link rows and the data that needs it (a model's calculations and hash links; a geometry's or calculation's properties and stationary points; a point's identity and stage links; a stage's links; a calculation's validations), but not geometries, stages, steps, identities, or model hashes.
+Identities and stages are reached through link rows (`StationaryPointRow.identity_links`, `IdentityRow.stationary_links`; `StationaryPointRow.stage_links`, `StageRow.stationary_links`); removing a link from either list deletes it.
 
 ## Style
 

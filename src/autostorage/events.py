@@ -37,6 +37,8 @@ from .models import (
     ModelRow,
     PropertyKindRow,
     PropertyValueRow,
+    StageRow,
+    StageStationaryLink,
     StationaryPointRow,
     StepRow,
     TrajectoryAxisRow,
@@ -188,6 +190,123 @@ def _pending[T](session: Session, cls: type[T]) -> list[T]:
     session while iterating.
     """
     return [obj for obj in (*session.new, *session.dirty) if isinstance(obj, cls)]
+
+
+def _has_changes(obj: object, *names: str) -> bool:
+    """Return whether any of the attributes `names` of `obj` changed."""
+    state = inspect(obj)
+    return any(state.attrs[name].history.has_changes() for name in names)
+
+
+def _link_stage(session: Session, link: StageStationaryLink) -> StageRow | None:
+    """Return the stage of `link`, via its relationship or foreign key."""
+    if link.stage is not None:
+        return link.stage
+    if link.stage_id is not None:
+        return session.get(StageRow, link.stage_id)
+    return None
+
+
+def _link_point(
+    session: Session, link: StageStationaryLink
+) -> StationaryPointRow | None:
+    """Return the stationary point of `link`, via its relationship or foreign key."""
+    if link.stationary is not None:
+        return link.stationary
+    if link.stationary_id is not None:
+        return session.get(StationaryPointRow, link.stationary_id)
+    return None
+
+
+def _link_point_id(link: StageStationaryLink) -> object:
+    """Return the point ID of `link`; point IDs are assigned at construction."""
+    if link.stationary is not None:
+        return link.stationary.id
+    return link.stationary_id
+
+
+def _live_stage_links(session: Session, stage: StageRow) -> list[StageStationaryLink]:
+    """Return the links of `stage` that will remain after this flush.
+
+    A link removed from its point's `stage_links` stays in the stage's list until
+    the flush deletes it as an orphan, so it is left out here.
+    """
+    return [
+        link
+        for link in stage.stationary_links
+        if link not in session.deleted
+        and not (
+            link.stationary is None
+            and inspect(link).attrs["stationary"].history.deleted
+        )
+    ]
+
+
+def _stages_changed_by(session: Session, obj: object) -> list[StageRow | None]:
+    """Return the stages whose content a new or dirty `obj` changes."""
+    if isinstance(obj, StageRow):
+        changed = obj in session.new or _has_changes(obj, "stationary_links", "is_ts")
+        return [obj] if changed else []
+    if isinstance(obj, StageStationaryLink):
+        if obj in session.new:
+            return [_link_stage(session, obj)]
+        fields = ("count", "stage", "stage_id", "stationary", "stationary_id")
+        if not _has_changes(obj, *fields):
+            return []
+        old_stages = inspect(obj).attrs["stage"].history.deleted
+        return [_link_stage(session, obj), *old_stages]
+    if isinstance(obj, StationaryPointRow):
+        removed = inspect(obj).attrs["stage_links"].history.deleted
+        return [_link_stage(session, link) for link in removed]
+    return []
+
+
+def _changed_stages(session: Session) -> list[StageRow]:
+    """Return new stages, and stages whose links or `is_ts` changed in this flush.
+
+    A stage that loses a link only because its point is deleted is not included:
+    stages are kept when their points are deleted.
+    """
+    candidates = [
+        stage
+        for obj in (*session.new, *session.dirty)
+        for stage in _stages_changed_by(session, obj)
+    ]
+    for obj in session.deleted:
+        if isinstance(obj, StageStationaryLink):
+            point = _link_point(session, obj)
+            if point is None or point not in session.deleted:
+                candidates.append(_link_stage(session, obj))
+    stages = {
+        id(stage): stage
+        for stage in candidates
+        if stage is not None and stage not in session.deleted
+    }
+    return list(stages.values())
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def verify_stage_points_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Verify that each new or changed stage has a point, and a TS stage just one.
+
+    A TS stage holds exactly one point, with count 1.
+    """
+    for stage in _changed_stages(session):
+        links = _live_stage_links(session, stage)
+        if not links:
+            msg = f"StageRow {stage.id} has no stationary points."
+            raise ValueError(msg)
+        if stage.is_ts and (len(links) != 1 or links[0].count != 1):
+            counts = [link.count for link in links]
+            msg = (
+                f"TS StageRow {stage.id} must hold exactly one stationary point "
+                f"with count 1, but has counts {counts}."
+            )
+            raise ValueError(msg)
 
 
 def _property_kind_name(obj: PropertyValueRow) -> str | None:

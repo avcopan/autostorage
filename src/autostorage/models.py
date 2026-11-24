@@ -3,7 +3,7 @@
 import hashlib
 import json
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any, Self
 
 import numpy as np
@@ -153,19 +153,29 @@ class CalculationTrajectoryLink(SQLModel, table=True):
 
 
 class StageStationaryLink(SQLModel, table=True):
-    """Association table linking stationary points to reaction stages.
+    """Association table linking stationary points to reaction stages, with counts.
 
-    Relationships are managed via `StationaryPointRow.stages` and
-    `StageRow.stationaries`, using this table as their `link_model`.
+    A point appears once per stage, `count` times (A + A is one link with count 2).
+    Removing a link from `StageRow.stationary_links` or
+    `StationaryPointRow.stage_links` deletes it.
     """
 
     __tablename__ = "stage_stationary_link"
-    __table_args__ = (Index("ix_stage_stationary_link_stage_id", "stage_id"),)
+    __table_args__ = (
+        Index("ix_stage_stationary_link_stage_id", "stage_id"),
+        CheckConstraint("count >= 1", name="chk_stage_count"),
+    )
 
     stationary_id: uuid.UUID | None = _link_fk_field("stationary_point.id")
     """Foreign key to the linked `StationaryPointRow`."""
     stage_id: uuid.UUID | None = _link_fk_field("stage.id")
     """Foreign key to the linked `StageRow`."""
+    count: int = 1
+    """How many times the point occurs in the stage."""
+    stationary: "StationaryPointRow" = Relationship(back_populates="stage_links")
+    """The linked `StationaryPointRow`."""
+    stage: "StageRow" = Relationship(back_populates="stationary_links")
+    """The linked `StageRow`."""
 
 
 class StepValidationLink(SQLModel, table=True):
@@ -687,7 +697,9 @@ class StationaryPointRow(SQLModel, table=True):
         calculation: Calculation that identified this point.
         identity_links: Link rows to this point's chemical identifiers (e.g. InChI,
             SMILES), each with its `identity_cache`.
-        stages: Reaction stages this stationary point belongs to.
+        stage_links: Link rows to the stages this point belongs to, with counts.
+        stages: Stages this point belongs to, each once. Read-only (reflects the
+            stored links); write `stage_links`.
     """
 
     __tablename__ = "stationary_point"
@@ -704,8 +716,11 @@ class StationaryPointRow(SQLModel, table=True):
     identity_links: list["IdentityStationaryLink"] = Relationship(
         back_populates="stationary", cascade_delete=True
     )
+    stage_links: list["StageStationaryLink"] = Relationship(
+        back_populates="stationary", cascade_delete=True
+    )
     stages: list["StageRow"] = Relationship(
-        back_populates="stationaries", link_model=StageStationaryLink
+        link_model=StageStationaryLink, sa_relationship_kwargs={"viewonly": True}
     )
 
 
@@ -713,11 +728,17 @@ class StationaryPointRow(SQLModel, table=True):
 class StageRow(SQLModel, table=True):
     """A chemical state (reactant, product, or transition state) in a reaction.
 
+    A stage is a multiset of stationary points: A + A is one link with count 2.
+    It must have a point, and a TS stage has exactly one, with count 1 (checked on
+    flush).
+
     Attributes:
         id: Primary key.
         is_ts: Whether this stage represents a transition state.
-        stationaries: Stationary points that make up this stage (bidirectional via
-            `link_model=StageStationaryLink`).
+        stationary_links: Link rows to the stage's stationary points, with counts.
+        stationaries: The stage's stationary points, each once. Read-only (reflects
+            the stored links); write `stationary_links`, or build the stage with
+            `from_points` or `get_or_create`.
         steps: Reaction steps referencing this stage as `stage1`, `stage2`, or
             `stage_ts`. Read-only view derived from `StepRow`'s foreign keys;
             use `stage1`, `stage2`, `stage_ts` relationships on `StepRow` for
@@ -729,8 +750,11 @@ class StageRow(SQLModel, table=True):
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     is_ts: bool = False
 
+    stationary_links: list["StageStationaryLink"] = Relationship(
+        back_populates="stage", cascade_delete=True
+    )
     stationaries: list["StationaryPointRow"] = Relationship(
-        back_populates="stages", link_model=StageStationaryLink
+        link_model=StageStationaryLink, sa_relationship_kwargs={"viewonly": True}
     )
     steps: list["StepRow"] = Relationship(
         sa_relationship_kwargs={
@@ -742,6 +766,27 @@ class StageRow(SQLModel, table=True):
             "viewonly": True,
         }
     )
+
+    @classmethod
+    def from_points(
+        cls, points: Iterable["StationaryPointRow"], *, is_ts: bool = False
+    ) -> Self:
+        """Build a new, unsaved stage, counting repeated points (by identity).
+
+        `[a, a, b]` gives links to `a` with count 2 and to `b` with count 1.
+        """
+        counted = _count_by_identity(points)
+        links = [StageStationaryLink(stationary=p, count=n) for p, n in counted]
+        return cls(is_ts=is_ts, stationary_links=links)
+
+
+def _count_by_identity[T](items: Iterable[T]) -> list[tuple[T, int]]:
+    """Count repeated items by object identity, in first-seen order."""
+    counts: dict[int, tuple[T, int]] = {}
+    for item in items:
+        _, n = counts.get(id(item), (item, 0))
+        counts[id(item)] = (item, n + 1)
+    return list(counts.values())
 
 
 class StepRow(SQLModel, table=True):

@@ -9,7 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`Model` and `Calculation`**: plain Pydantic classes (`autostorage.domain`) that `ModelRow` and `CalculationRow` inherit from, so a model can be built in memory and hashed with `ModelHashAlgorithm.hash` before it is stored.
 - New tables `model_hash_algorithm`, `model_hash` and `model_hash_link` (`ModelHashAlgorithmRow`, `ModelHashRow`, `ModelHashLink`). Only tables are added, so `create_all` upgrades an existing database. There is **no backfill**: models stored before this change, or before an algorithm was registered, get no hash links until their program, method, basis, or keywords change.
 
+- **Stage counts**: a stage is a multiset of stationary points. `StageStationaryLink.count` (at least 1) says how many times a point occurs, so A + A is one link with count 2. `StageRow.from_points(points, is_ts=...)` builds a new stage, counting repeated points. On flush, a new or changed stage must have a point, and a TS stage exactly one, with count 1.
+- `StageRow.stationary_links`, `StationaryPointRow.stage_links`, and `StageStationaryLink.stage` / `.stationary`: the stage links are association objects, as identity links are. Removing a link from either list deletes it.
+
 ### Changed
+- **Breaking:** the new `stage_stationary_link.count` column changes the schema, so databases created by earlier versions must be regenerated.
+- **Breaking:** `StageRow.stationaries` and `StationaryPointRow.stages` are read-only. Write stages through `StageRow.stationary_links` or `StageRow.from_points`. Empty stages, and TS stages with more than one point, now raise a `ValueError` on flush.
 - `ModelRow.keywords` holds electronic-structure keywords only; optimizer keywords belong in `CalculationRow.input_provenance`, which is recorded but never hashed. This is documented, not enforced.
 
 ## [0.0.23] - 2026-11-19

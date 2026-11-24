@@ -249,11 +249,13 @@ class TestSetGeometryHash:
 class TestSortStepStageIds:
     """Tests for sort_step_stage_ids event listener."""
 
-    def test_stage_ids_sorted_on_insert(self, database: Database) -> None:
+    def test_stage_ids_sorted_on_insert(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """stage_id1 and stage_id2 are auto-sorted on insert."""
         with database.session() as session:
             # Create two stages, named by the order of their ids
-            stages = [StageRow(is_ts=False) for _ in range(2)]
+            stages = [make_stage() for _ in range(2)]
             session.add_all(stages)
             session.flush()
             stage_small, stage_large = sorted(stages, key=lambda s: str(s.id))
@@ -274,11 +276,13 @@ class TestSortStepStageIds:
             assert step.stage_id1 == stage_small.id
             assert step.stage_id2 == stage_large.id
 
-    def test_stage_ids_sorted_on_update(self, database: Database) -> None:
+    def test_stage_ids_sorted_on_update(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """stage_id1 and stage_id2 are auto-sorted on update."""
         with database.session() as session:
             # Create three stages, named so that A < B < C
-            stages = [StageRow(is_ts=False) for _ in range(3)]
+            stages = [make_stage() for _ in range(3)]
             session.add_all(stages)
             session.flush()
             stage_a, stage_b, stage_c = sorted(stages, key=lambda s: str(s.id))
@@ -304,11 +308,13 @@ class TestSortStepStageIds:
             assert step.stage_id1 == stage_a.id
             assert step.stage_id2 == stage_c.id
 
-    def test_equal_stage_ids_unchanged(self, database: Database) -> None:
+    def test_equal_stage_ids_unchanged(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """If stage_id1 == stage_id2, they remain unchanged."""
         with database.session() as session:
             # Create a single stage
-            stage = StageRow(is_ts=False)
+            stage = make_stage()
             session.add(stage)
             session.flush()
 
@@ -324,11 +330,13 @@ class TestSortStepStageIds:
             with pytest.raises(IntegrityError):
                 session.commit()
 
-    def test_sorting_three_stage_ids(self, database: Database) -> None:
+    def test_sorting_three_stage_ids(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Sorting works with three different stages."""
         with database.session() as session:
             # Create three stages, named so that X < Y < Z
-            stages = [StageRow(is_ts=False) for _ in range(3)]
+            stages = [make_stage() for _ in range(3)]
             session.add_all(stages)
             session.flush()
             stage_x, _, stage_z = sorted(stages, key=lambda s: str(s.id))
@@ -353,12 +361,14 @@ class TestSortStepStageIds:
 class TestVerifyStepBarrierlessConsistency:
     """Tests for verify_step_barrierless_consistency event listener."""
 
-    def test_barrierless_requires_no_ts(self, database: Database) -> None:
+    def test_barrierless_requires_no_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless step (stage_id_ts=None) must have is_barrierless=True."""
         with database.session() as session:
             # Create two stages
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -374,12 +384,14 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=True"):
                 session.flush()
 
-    def test_non_barrierless_requires_ts(self, database: Database) -> None:
+    def test_non_barrierless_requires_ts(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Non-barrierless step must have stage_id_ts!=None."""
         with database.session() as session:
             # Create three stages (two regular, one TS)
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -395,11 +407,13 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=True"):
                 session.flush()
 
-    def test_barrierless_step_valid(self, database: Database) -> None:
+    def test_barrierless_step_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless step with is_barrierless=True and stage_id_ts=None is valid."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
@@ -416,12 +430,14 @@ class TestVerifyStepBarrierlessConsistency:
             assert step.stage_id_ts is None
             assert step.is_barrierless is True
 
-    def test_step_with_ts_valid(self, database: Database) -> None:
+    def test_step_with_ts_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Step with transition state and is_barrierless=False is valid."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
-            stage_ts = StageRow(is_ts=True)
+            stage1 = make_stage()
+            stage2 = make_stage()
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -439,13 +455,13 @@ class TestVerifyStepBarrierlessConsistency:
             assert step.is_barrierless is False
 
     def test_step_with_ts_requires_is_barrierless_false(
-        self, database: Database
+        self, make_stage: Callable[..., StageRow], database: Database
     ) -> None:
         """Step with stage_id_ts!=None must have is_barrierless=False."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
-            stage_ts = StageRow(is_ts=True)
+            stage1 = make_stage()
+            stage2 = make_stage()
+            stage_ts = make_stage(is_ts=True)
             session.add_all([stage1, stage2, stage_ts])
             session.flush()
 
@@ -461,11 +477,13 @@ class TestVerifyStepBarrierlessConsistency:
             with pytest.raises(ValueError, match="must have is_barrierless=False"):
                 session.flush()
 
-    def test_barrierless_consistency_on_update(self, database: Database) -> None:
+    def test_barrierless_consistency_on_update(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
         """Barrierless consistency is checked on update."""
         with database.session() as session:
-            stage1 = StageRow(is_ts=False)
-            stage2 = StageRow(is_ts=False)
+            stage1 = make_stage()
+            stage2 = make_stage()
             session.add_all([stage1, stage2])
             session.flush()
 
