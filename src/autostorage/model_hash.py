@@ -1,5 +1,7 @@
 """Model hash algorithm registry with default definitions."""
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, runtime_checkable
@@ -12,6 +14,8 @@ __all__ = [
     "ModelHashAlgorithmRegistry",
     "ModelHashKind",
     "ModelHashProtocol",
+    "exact_hash",
+    "minimal_hash",
 ]
 
 
@@ -114,3 +118,48 @@ class ModelHashAlgorithmRegistry:
             available = ", ".join(sorted(a.name for a in cls.algorithms))
             msg = f"Unknown model hash algorithm {name!r}. Available: {available}"
             raise KeyError(msg) from None
+
+
+def minimal_hash_fn(
+    program: str,  # noqa: ARG001
+    method: str,
+    basis: str | None,
+    keywords: Mapping[str, Any] | None,  # noqa: ARG001
+) -> str:
+    """Method and basis, stripped and lower-cased: ``"b3lyp/6-31g*"``."""
+    method = method.strip().lower()
+    basis = (basis or "").strip().lower()
+    return f"{method}/{basis}" if basis else method
+
+
+minimal_hash = ModelHashAlgorithmRegistry.register(
+    name="minimal@1", kind=ModelHashKind.MINIMAL, hash_fn=minimal_hash_fn
+)
+"""Method and basis, lower-cased (kind: minimal)."""
+
+
+def exact_hash_fn(
+    program: str,
+    method: str,
+    basis: str | None,
+    keywords: Mapping[str, Any] | None,
+) -> str:
+    """SHA-256 of the canonical JSON of program, method, basis and keywords.
+
+    Raises:
+        TypeError: If the keywords aren't JSON-serializable.
+    """
+    payload = {
+        "program": program,
+        "method": method,
+        "basis": basis,
+        "keywords": keywords or {},
+    }
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+exact_hash = ModelHashAlgorithmRegistry.register(
+    name="exact@1", kind=ModelHashKind.EXACT, hash_fn=exact_hash_fn
+)
+"""Program, method, basis and keywords, exactly as given (kind: exact)."""

@@ -23,6 +23,8 @@ from .model_hash import (
     ModelHashAlgorithm,
     ModelHashAlgorithmRegistry,
     ModelHashProtocol,
+    exact_hash,
+    minimal_hash,
 )
 from .models import (
     CalculationGeometryLink,
@@ -98,11 +100,13 @@ __all__ = [
     "domain",
     "energy_property_kind",
     "events",
+    "exact_hash",
     "geometry_hash",
     "gradient_property_kind",
     "hessian_property_kind",
     "hill_formula",
     "identity",
+    "minimal_hash",
     "model_hash",
     "query",
     "rdkit_inchi",
