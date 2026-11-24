@@ -76,6 +76,11 @@ def _json_dict_column() -> Column:
     return Column(MutableDict.as_mutable(JSON))
 
 
+def _compressed_json_dict_column() -> Column:
+    """Build a nullable zlib-compressed JSON column whose dict tracks key changes."""
+    return Column(MutableDict.as_mutable(CompressedJSONTypeDecorator()), nullable=True)
+
+
 def geometry_hash(geo: Geometry) -> str:
     """SHA-256 digest of a Geometry's symbols, coordinates, charge, and spin."""
     header = json.dumps([geo.symbols, geo.charge, geo.spin])
@@ -233,11 +238,10 @@ class IdentityStationaryLink(SQLModel, table=True):
     """Foreign key to the linked `StationaryPointRow`."""
     identity_id: uuid.UUID | None = _link_fk_field("identity.id")
     """Foreign key to the linked `IdentityRow`."""
-    identity_cache: dict[str, Any] | None = Field(
-        default=None,
-        sa_column=Column(MutableDict.as_mutable(CompressedJSONTypeDecorator())),
+    algorithm_cache: dict[str, Any] | None = Field(
+        default=None, sa_column=_compressed_json_dict_column()
     )
-    """Data that makes generating identities cheaper (e.g. graph isomorphisms).
+    """Algorithm-specific data for this point's identity (e.g. graph automorphisms).
 
     Stored as zlib-compressed JSON. Only top-level key changes are tracked in
     place; reassign the dict after editing nested values. Discarded with the
@@ -721,7 +725,7 @@ class StationaryPointRow(SQLModel, table=True):
         geometry: Geometry defining the coordinates of this point.
         calculation: Calculation that identified this point.
         identity_links: Link rows to this point's chemical identifiers (e.g. InChI,
-            SMILES), each with its `identity_cache`.
+            SMILES), each with its `algorithm_cache`.
         stage_links: Link rows to the stages this point belongs to, with counts.
         stages: Stages this point belongs to, each once. Read-only (reflects the
             stored links); write `stage_links`.
@@ -940,6 +944,8 @@ class IdentityRow(SQLModel, table=True):
             smiles``); its ``kind`` gives the category (e.g. ``stereoisomer``,
             ``formula``).
         value: The resulting identifier string.
+        algorithm_cache: Algorithm-specific data for this identity, stored as
+            zlib-compressed JSON. Reserved: nothing writes it yet.
         stationary_links: Link rows to the stationary points sharing this identity.
     """
 
@@ -951,6 +957,9 @@ class IdentityRow(SQLModel, table=True):
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     algorithm_name: str | None = _fk_field("identity_algorithm.name")
     value: str
+    algorithm_cache: dict[str, Any] | None = Field(
+        default=None, sa_column=_compressed_json_dict_column()
+    )
 
     algorithm: "IdentityAlgorithmRow" = Relationship(back_populates="identities")
     stationary_links: list["IdentityStationaryLink"] = Relationship(

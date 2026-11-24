@@ -1657,7 +1657,7 @@ class TestIdentitiesOnGeometryChange:
             assert "CH4" in values
             assert "H2O" not in values
 
-    def test_reassigned_geometry_discards_identity_cache(
+    def test_reassigned_geometry_discards_algorithm_cache(
         self,
         database: Database,
         make_calculation: Callable[[], CalculationRow],
@@ -1672,7 +1672,7 @@ class TestIdentitiesOnGeometryChange:
             session.commit()
             ids_before = {ident.id for ident in _identities(stp)}
             for link in stp.identity_links:
-                link.identity_cache = {"stale": True}
+                link.algorithm_cache = {"stale": True}
             session.commit()
 
             stp.geometry = make_geometry_water()
@@ -1680,7 +1680,7 @@ class TestIdentitiesOnGeometryChange:
             session.expire_all()
 
             assert {ident.id for ident in _identities(stp)} == ids_before
-            assert all(link.identity_cache is None for link in stp.identity_links)
+            assert all(link.algorithm_cache is None for link in stp.identity_links)
 
 
 class TestOrderRestrictedIdentities:

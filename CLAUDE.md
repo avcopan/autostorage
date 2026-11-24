@@ -29,7 +29,7 @@ The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier 
 - Trajectory axes (`TrajectoryAxisRow`) are validated, and missing `GeometryTrajectoryLink.values` of distance/angle/dihedral axes are measured with autogeom (quantities are converted to the axis's units).
 
 Nothing commits automatically: call `session.commit()`.
-Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians), and `IdentityStationaryLink.identity_cache` as zlib-compressed JSON by `CompressedJSONTypeDecorator`.
+Arrays are stored zlib-compressed by `CompressedArrayTypeDecorator` (float64, but float32 for Hessians), and `IdentityStationaryLink.algorithm_cache` and `IdentityRow.algorithm_cache` as zlib-compressed JSON by `CompressedJSONTypeDecorator`.
 Deleting a row deletes its link rows and the data that needs it (a model's calculations and hash links; a geometry's or calculation's properties and stationary points; a point's identity and stage links; a stage's links; a calculation's validations), but not geometries, stages, steps, identities, or model hashes.
 Identities and stages are reached through link rows (`StationaryPointRow.identity_links`, `IdentityRow.stationary_links`; `StationaryPointRow.stage_links`, `StageRow.stationary_links`); removing a link from either list deletes it.
 

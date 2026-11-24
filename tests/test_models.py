@@ -1188,6 +1188,19 @@ class TestIdentityRow:
             assert identity.algorithm.name == "rdkit_inchi"
             assert identity.value == "InChI=1S/CH4/h1H4"
 
+    def test_algorithm_cache_round_trip(self, database: Database) -> None:
+        """`algorithm_cache` is empty by default and stored as a dict."""
+        with database.session() as session:
+            identity = IdentityRow(algorithm_name="hill_formula", value="CH4")
+            session.add(identity)
+            session.commit()
+            assert identity.algorithm_cache is None
+
+            identity.algorithm_cache = {"automorphisms": [[0, 1], [1, 0]]}
+            session.commit()
+            session.expire_all()
+            assert identity.algorithm_cache == {"automorphisms": [[0, 1], [1, 0]]}
+
     def test_identity_unique_constraint(self, database: Database) -> None:
         """IdentityRow enforces unique constraint on algorithm and value."""
         with database.session() as session:
@@ -1564,7 +1577,7 @@ class TestLinkModels:
 
             assert link.stationary_id == stat_pt.id
             assert link.identity_id == identity.id
-            assert link.identity_cache is None
+            assert link.algorithm_cache is None
 
     @pytest.fixture
     def identity_link(
@@ -1577,23 +1590,23 @@ class TestLinkModels:
             session.commit()
             yield session, stp.identity_links[0]
 
-    def test_identity_cache_round_trip(
+    def test_algorithm_cache_round_trip(
         self, identity_link: tuple[Session, IdentityStationaryLink]
     ) -> None:
-        """`identity_cache` is stored compressed and read back as a dict."""
+        """`algorithm_cache` is stored compressed and read back as a dict."""
         session, link = identity_link
         cache = {"graph": [[0, 1], [0, 2]], "hash": "abc"}
-        link.identity_cache = cache
+        link.algorithm_cache = cache
         session.commit()
         session.expire_all()
 
-        assert link.identity_cache == cache
+        assert link.algorithm_cache == cache
         assert link.identity_id is not None
         raw = (
             session.connection()
             .execute(
                 text(
-                    "SELECT identity_cache FROM identity_stationary_link "
+                    "SELECT algorithm_cache FROM identity_stationary_link "
                     "WHERE identity_id = :id"
                 ).bindparams(id=link.identity_id.hex)
             )
@@ -1601,19 +1614,19 @@ class TestLinkModels:
         )
         assert json.loads(zlib.decompress(raw)) == cache
 
-    def test_identity_cache_in_place_change_persists(
+    def test_algorithm_cache_in_place_change_persists(
         self, identity_link: tuple[Session, IdentityStationaryLink]
     ) -> None:
-        """Setting a key of `identity_cache` in place is saved."""
+        """Setting a key of `algorithm_cache` in place is saved."""
         session, link = identity_link
-        link.identity_cache = {"a": 1}
+        link.algorithm_cache = {"a": 1}
         session.commit()
-        assert link.identity_cache is not None
-        link.identity_cache["b"] = 2
+        assert link.algorithm_cache is not None
+        link.algorithm_cache["b"] = 2
         session.commit()
         session.expire_all()
 
-        assert link.identity_cache == {"a": 1, "b": 2}
+        assert link.algorithm_cache == {"a": 1, "b": 2}
 
     def test_removing_identity_link_deletes_it(
         self, identity_link: tuple[Session, IdentityStationaryLink]

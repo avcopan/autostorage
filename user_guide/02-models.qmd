@@ -22,7 +22,7 @@ Association tables implementing many-to-many relationships between entities.
 | `CalculationTrajectoryLink` | Associates trajectories with calculations as inputs or outputs |
 | `StageStationaryLink` | Connects stationary points to reaction stages |
 | `StepValidationLink` | Links validation calculations to reaction steps |
-| `IdentityStationaryLink` | Associates chemical identities with stationary points; its `identity_cache` holds data that makes generating identities cheaper |
+| `IdentityStationaryLink` | Associates chemical identities with stationary points; its `algorithm_cache` holds algorithm-specific data for that point (e.g. graph automorphisms) |
 | `ModelHashLink` | Associates model hashes with models |
 
 ### Core Data Models
@@ -114,5 +114,5 @@ On flush, each link's `values` (one per dimension, aligned with `index`) are fil
 - **Provenance tracking**: Calculations record both input and output provenance metadata
 - **Native units**: each property kind declares its native units (`energy` in Hartree, `gradient` in Hartree/Bohr, `hessian` in Hartree/Bohr²). Values are always stored in them: a `pint.Quantity` (e.g. `autogeom.ureg.Quantity(-1.2, "kcal/mol")`) is converted on flush, and a value without units is assumed to be in the native units already. molar units such as kcal/mol are converted with Avogadro's constant. `PropertyKind.from_native(value, "kcal/mol")` converts a stored value back out, and `PropertyKind.quantity` attaches the native units to it
 - **Validated stationary points**: on flush, a stationary point is marked `is_validated` if every Hessian of its geometry has `order` negative eigenvalues after translations and rotations are projected out (`autogeom.vibrational_analysis` and `autogeom.stationary_point_order`). Otherwise, `is_validated` is reset to `False` and a `StationaryOrderWarning` is issued. This check runs again when the point or one of its Hessians is added, changed, or deleted. Pseudo stationary points are skipped
-- **Compressed storage**: NumPy arrays (coordinates and property values) are stored as zlib-compressed binary data via `CompressedArrayTypeDecorator`; property values are stored as float64, except Hessians (float32). Identity caches are stored as zlib-compressed JSON via `CompressedJSONTypeDecorator`
+- **Compressed storage**: NumPy arrays (coordinates and property values) are stored as zlib-compressed binary data via `CompressedArrayTypeDecorator`; property values are stored as float64, except Hessians (float32). Identity `algorithm_cache`s are stored as zlib-compressed JSON via `CompressedJSONTypeDecorator`
 - **Graph structure**: The schema forms a directed graph where calculations consume and produce geometries/trajectories, geometries carry results, stationary points reference geometries, and reaction steps connect stages
