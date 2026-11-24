@@ -21,8 +21,11 @@ from sqlmodel import (
     Field,
     Index,
     Relationship,
+    Session,
     SQLModel,
     UniqueConstraint,
+    col,
+    select,
     text,
 )
 from sqlmodel.main import SQLModelConfig
@@ -80,6 +83,18 @@ def geometry_hash(geo: Geometry) -> str:
     digest = hashlib.sha256(header.encode())
     digest.update(coords.tobytes())
     return digest.hexdigest()
+
+
+def stage_hash(
+    points_and_counts: Iterable[tuple[uuid.UUID | str | None, int]], *, is_ts: bool
+) -> str:
+    """SHA-256 digest of a stage's `is_ts` and (point ID, count) pairs, in any order.
+
+    Give each point once, with its count.
+    """
+    pairs = sorted((str(point_id), count) for point_id, count in points_and_counts)
+    content = json.dumps([is_ts, pairs], separators=(",", ":"))
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 # 0. Link rows
@@ -176,6 +191,16 @@ class StageStationaryLink(SQLModel, table=True):
     """The linked `StationaryPointRow`."""
     stage: "StageRow" = Relationship(back_populates="stationary_links")
     """The linked `StageRow`."""
+
+    @property
+    def point_id(self) -> uuid.UUID | None:
+        """The linked point's ID, before or after the first flush.
+
+        Point IDs are assigned at construction, but `stationary_id` only on flush.
+        """
+        if self.stationary is not None:
+            return self.stationary.id
+        return self.stationary_id
 
 
 class StepValidationLink(SQLModel, table=True):
@@ -735,6 +760,13 @@ class StageRow(SQLModel, table=True):
     Attributes:
         id: Primary key.
         is_ts: Whether this stage represents a transition state.
+        hash: `stage_hash` of the stage's points, counts, and `is_ts`, set on flush.
+            Unique, so the same stage can't be stored twice; share stages with
+            `get_or_create`. Merging duplicate stationary points (a future
+            clean-up) can make two stages' contents equal: the clean-up must then
+            merge the stages and re-point their steps. Deleting a point leaves
+            its stages' hashes as they were, naming the deleted point, so no new
+            stage can collide with them.
         stationary_links: Link rows to the stage's stationary points, with counts.
         stationaries: The stage's stationary points, each once. Read-only (reflects
             the stored links); write `stationary_links`, or build the stage with
@@ -749,6 +781,7 @@ class StageRow(SQLModel, table=True):
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     is_ts: bool = False
+    hash: str | None = Field(default=None, unique=True, index=True, nullable=False)
 
     stationary_links: list["StageStationaryLink"] = Relationship(
         back_populates="stage", cascade_delete=True
@@ -778,6 +811,35 @@ class StageRow(SQLModel, table=True):
         counted = _count_by_identity(points)
         links = [StageStationaryLink(stationary=p, count=n) for p, n in counted]
         return cls(is_ts=is_ts, stationary_links=links)
+
+    @classmethod
+    def get_or_create(
+        cls,
+        session: Session,
+        points: Iterable["StationaryPointRow"],
+        *,
+        is_ts: bool = False,
+    ) -> Self:
+        """Return the stage with these points (pending or stored), or add a new one.
+
+        Repeated points are counted, as in `from_points`. Writers share stages
+        through this method.
+        """
+        points = list(points)
+        counted = [(p.id, n) for p, n in _count_by_identity(points)]
+        value = stage_hash(counted, is_ts=is_ts)
+        for obj in session.new:
+            if isinstance(obj, cls) and obj.is_ts == is_ts:
+                pairs = [(link.point_id, link.count) for link in obj.stationary_links]
+                if stage_hash(pairs, is_ts=is_ts) == value:
+                    return obj
+        with session.no_autoflush:
+            stage = session.exec(select(cls).where(col(cls.hash) == value)).first()
+        if stage is not None and stage not in session.deleted:
+            return stage
+        stage = cls.from_points(points, is_ts=is_ts)
+        session.add(stage)
+        return stage
 
 
 def _count_by_identity[T](items: Iterable[T]) -> list[tuple[T, int]]:

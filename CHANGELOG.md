@@ -10,11 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - New tables `model_hash_algorithm`, `model_hash` and `model_hash_link` (`ModelHashAlgorithmRow`, `ModelHashRow`, `ModelHashLink`). Only tables are added, so `create_all` upgrades an existing database. There is **no backfill**: models stored before this change, or before an algorithm was registered, get no hash links until their program, method, basis, or keywords change.
 
 - **Stage counts**: a stage is a multiset of stationary points. `StageStationaryLink.count` (at least 1) says how many times a point occurs, so A + A is one link with count 2. `StageRow.from_points(points, is_ts=...)` builds a new stage, counting repeated points. On flush, a new or changed stage must have a point, and a TS stage exactly one, with count 1.
+- **Content-addressed stages**: `StageRow.hash` is a unique, indexed `stage_hash()` (exported from `autostorage`): SHA-256 of the stage's `is_ts` and its (point ID, count) pairs, in any order. It is set on flush for new stages and for stages whose links or `is_ts` changed, so storing the same stage twice raises an `IntegrityError`, as a duplicate geometry does. `StageRow.get_or_create(session, points, is_ts=...)` returns the matching pending or stored stage, or adds a new one; writers share stages through it.
 - `StageRow.stationary_links`, `StationaryPointRow.stage_links`, and `StageStationaryLink.stage` / `.stationary`: the stage links are association objects, as identity links are. Removing a link from either list deletes it.
 
 ### Changed
-- **Breaking:** the new `stage_stationary_link.count` column changes the schema, so databases created by earlier versions must be regenerated.
-- **Breaking:** `StageRow.stationaries` and `StationaryPointRow.stages` are read-only. Write stages through `StageRow.stationary_links` or `StageRow.from_points`. Empty stages, and TS stages with more than one point, now raise a `ValueError` on flush.
+- **Breaking:** the new `stage_stationary_link.count` and `stage.hash` columns change the schema, so databases created by earlier versions must be regenerated.
+- **Breaking:** `StageRow.stationaries` and `StationaryPointRow.stages` are read-only. Write stages through `StageRow.stationary_links`, `StageRow.from_points`, or `StageRow.get_or_create`. Empty stages, and TS stages with more than one point, now raise a `ValueError` on flush, and duplicate stages an `IntegrityError`.
 - `ModelRow.keywords` holds electronic-structure keywords only; optimizer keywords belong in `CalculationRow.input_provenance`, which is recorded but never hashed. This is documented, not enforced.
 
 ## [0.0.23] - 2026-11-19

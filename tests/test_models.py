@@ -998,6 +998,61 @@ class TestStageRow:
                 session.flush()
 
 
+class TestStageGetOrCreate:
+    """Tests for StageRow.get_or_create."""
+
+    def test_same_points_same_row_pending(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """The same points, in any order, give the pending stage."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, [a, a, b])
+            assert stage in session.new
+            assert StageRow.get_or_create(session, [b, a, a]) is stage
+            session.commit()
+            assert len(session.exec(select(StageRow)).all()) == 1
+
+    def test_same_points_same_row_persisted(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """The same points give the stored stage."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, [a, b])
+            ids = (a.id, b.id)
+            session.commit()
+            stage_id = stage.id
+
+        with database.session() as session:
+            a, b = (session.get_one(StationaryPointRow, i) for i in ids)
+            found = StageRow.get_or_create(session, [b, a])
+            assert found.id == stage_id
+            assert found not in session.new
+
+    @pytest.mark.parametrize(
+        ("points", "is_ts"), [([0, 0, 1], False), ([0], False), ([0, 1], True)]
+    )
+    def test_different_content_different_row(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        points: list[int],
+        is_ts: bool,  # noqa: FBT001
+    ) -> None:
+        """Different counts, points, or `is_ts` give a different stage."""
+        made = [make_point(), make_point()]
+        with database.session() as session:
+            stage = StageRow.get_or_create(session, made)
+            session.commit()
+
+            other = StageRow.get_or_create(
+                session, [made[i] for i in points], is_ts=is_ts
+            )
+            assert other is not stage
+            assert other in session.new
+
+
 class TestStepRow:
     """Tests for StepRow model."""
 

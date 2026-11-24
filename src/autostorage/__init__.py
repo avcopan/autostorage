@@ -51,6 +51,7 @@ from .models import (
     TrajectoryRow,
     ValidationRow,
     geometry_hash,
+    stage_hash,
 )
 from .property import (
     PropertyKind,
@@ -120,5 +121,6 @@ __all__ = [
     "rdkit_inchi",
     "rdkit_inchi_conn",
     "rdkit_smiles",
+    "stage_hash",
     "types",
 ]

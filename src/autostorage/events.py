@@ -44,6 +44,7 @@ from .models import (
     TrajectoryAxisRow,
     TrajectoryRow,
     geometry_hash,
+    stage_hash,
 )
 from .property import PropertyKindRegistry, hessian_property_kind
 from .types import AxisKind
@@ -218,13 +219,6 @@ def _link_point(
     return None
 
 
-def _link_point_id(link: StageStationaryLink) -> object:
-    """Return the point ID of `link`; point IDs are assigned at construction."""
-    if link.stationary is not None:
-        return link.stationary.id
-    return link.stationary_id
-
-
 def _live_stage_links(session: Session, stage: StageRow) -> list[StageStationaryLink]:
     """Return the links of `stage` that will remain after this flush.
 
@@ -307,6 +301,23 @@ def verify_stage_points_before_flush(
                 f"with count 1, but has counts {counts}."
             )
             raise ValueError(msg)
+
+
+@event.listens_for(AutostorageSession, "before_flush")
+def set_stage_hash_before_flush(
+    session: Session,
+    flush_context: UOWTransaction,  # noqa: ARG001
+    instances: object,  # noqa: ARG001
+) -> None:
+    """Set `hash` on new or changed stages; its unique index rejects duplicates.
+
+    Runs before the flush, since a stage's links are separate rows that a mapper
+    "before_insert" hook can't see.
+    """
+    for stage in _changed_stages(session):
+        links = _live_stage_links(session, stage)
+        pairs = [(link.point_id, link.count) for link in links]
+        stage.hash = stage_hash(pairs, is_ts=stage.is_ts)
 
 
 def _property_kind_name(obj: PropertyValueRow) -> str | None:

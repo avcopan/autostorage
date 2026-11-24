@@ -36,10 +36,12 @@ from autostorage.models import (
     PropertyKindRow,
     PropertyValueRow,
     StageRow,
+    StageStationaryLink,
     StationaryPointRow,
     StepRow,
     TrajectoryRow,
     geometry_hash,
+    stage_hash,
 )
 
 # Test data constants
@@ -244,6 +246,91 @@ class TestSetGeometryHash:
             ).one()
 
             assert found.id == geo.id
+
+
+class TestSetStageHash:
+    """Tests for set_stage_hash_before_flush and stage_hash."""
+
+    def test_hash_ignores_order_and_counts_repeats(self) -> None:
+        """The hash ignores point order, but not counts or `is_ts`."""
+        a, b = uuid.uuid4(), uuid.uuid4()
+        value = stage_hash([(a, 2), (b, 1)], is_ts=False)
+        assert stage_hash([(b, 1), (a, 2)], is_ts=False) == value
+        assert stage_hash([(a, 1), (b, 1)], is_ts=False) != value
+        assert stage_hash([(a, 2), (b, 1)], is_ts=True) != value
+
+    def test_hash_set_on_flush(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A new stage's hash is set from its points and counts."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b, a])
+            session.add(stage)
+            session.flush()
+            assert stage.hash == stage_hash([(a.id, 2), (b.id, 1)], is_ts=False)
+
+    def test_duplicate_stage_raises(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """A second stage with the same content, built by hand, is rejected."""
+        a = make_point()
+        with database.session() as session:
+            session.add(StageRow.from_points([a]))
+            session.commit()
+
+            session.add(StageRow.from_points([a]))
+            with pytest.raises(IntegrityError):
+                session.commit()
+
+    @pytest.mark.parametrize("change", ["add", "remove", "recount", "is_ts"])
+    def test_changing_links_rehashes(
+        self,
+        make_point: Callable[..., StationaryPointRow],
+        database: Database,
+        change: str,
+    ) -> None:
+        """Adding, removing, or recounting a link, or changing `is_ts`, rehashes."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b])
+            session.add(stage)
+            session.commit()
+
+            if change == "add":
+                c = make_point()
+                stage.stationary_links.append(StageStationaryLink(stationary=c))
+                expected = [(a.id, 1), (b.id, 1), (c.id, 1)]
+            elif change == "remove":
+                b.stage_links.clear()
+                expected = [(a.id, 1)]
+            elif change == "recount":
+                stage.stationary_links[0].count = 2
+                link_a, link_b = stage.stationary_links
+                expected = [(link_a.point_id, 2), (link_b.point_id, 1)]
+            else:
+                b.stage_links.clear()
+                stage.is_ts = True
+                expected = [(a.id, 1)]
+            session.commit()
+
+            is_ts = change == "is_ts"
+            assert stage.hash == stage_hash(expected, is_ts=is_ts)
+
+    def test_deleting_point_keeps_hash(
+        self, make_point: Callable[..., StationaryPointRow], database: Database
+    ) -> None:
+        """Deleting a point leaves its stages' hashes as they were."""
+        a, b = make_point(), make_point()
+        with database.session() as session:
+            stage = StageRow.from_points([a, b])
+            session.add(stage)
+            session.commit()
+            value = stage.hash
+
+            session.delete(b)
+            session.commit()
+            assert stage.hash == value
 
 
 class TestSortStepStageIds:
