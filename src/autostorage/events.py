@@ -45,6 +45,7 @@ from .models import (
     TrajectoryAxisRow,
     TrajectoryRow,
     geometry_hash,
+    identity_value_hash,
     stage_hash,
 )
 from .property import PropertyKindRegistry, hessian_property_kind
@@ -148,6 +149,17 @@ def set_geometry_hash(
 ) -> None:
     """Set `hash`, whose unique index rejects duplicate geometries."""
     target.hash = geometry_hash(target)
+
+
+@event.listens_for(IdentityRow, "before_insert")
+@event.listens_for(IdentityRow, "before_update")
+def set_identity_value_hash(
+    mapper: Mapper[IdentityRow],  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: IdentityRow,
+) -> None:
+    """Set `value_hash`, which identities are unique and looked up by."""
+    target.value_hash = identity_value_hash(target.value)
 
 
 @event.listens_for(StepRow, "before_insert")
@@ -743,7 +755,7 @@ def _get_or_create_identity(
         ident = ctx.session.exec(
             select(IdentityRow).where(
                 col(IdentityRow.algorithm_name) == algorithm_name,
-                col(IdentityRow.value) == value,
+                col(IdentityRow.value_hash) == identity_value_hash(value),
             )
         ).one_or_none()
     if ident is None:

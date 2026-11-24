@@ -51,6 +51,7 @@ from .models import (
     TrajectoryRow,
     ValidationRow,
     geometry_hash,
+    identity_value_hash,
     stage_hash,
 )
 from .property import (
@@ -115,6 +116,7 @@ __all__ = [
     "hessian_property_kind",
     "hill_formula",
     "identity",
+    "identity_value_hash",
     "minimal_hash",
     "model_hash",
     "query",

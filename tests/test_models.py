@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 from autogeom import ureg
 from pydantic import ValidationError
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, col, select, text
 
@@ -43,6 +44,7 @@ from autostorage.models import (
     TrajectoryAxisRow,
     TrajectoryRow,
     ValidationRow,
+    identity_value_hash,
 )
 from autostorage.types import AxisKind, ModelHashKind, Role
 
@@ -1187,6 +1189,34 @@ class TestIdentityRow:
             assert identity.algorithm.kind == "stereoisomer"
             assert identity.algorithm.name == "rdkit_inchi"
             assert identity.value == "InChI=1S/CH4/h1H4"
+
+    def test_value_hash(self, database: Database) -> None:
+        """`value_hash` is set on insert and on a changed value."""
+        with database.session() as session:
+            identity = IdentityRow(algorithm_name="hill_formula", value="CH4")
+            session.add(identity)
+            session.flush()
+            assert identity.value_hash == identity_value_hash("CH4")
+
+            identity.value = "H2O"
+            session.flush()
+            assert identity.value_hash == identity_value_hash("H2O")
+
+    def test_long_value_unindexed(self, database: Database) -> None:
+        """A long value is stored, and only its hash is indexed."""
+        value = "x" * 10_000
+        with database.session() as session:
+            session.add(IdentityRow(algorithm_name="hill_formula", value=value))
+            session.commit()
+            stored = session.exec(
+                select(IdentityRow).where(
+                    col(IdentityRow.value_hash) == identity_value_hash(value)
+                )
+            ).one()
+            assert stored.value == value
+
+        indexes = sa_inspect(database.engine).get_indexes("identity")
+        assert all("value" not in index["column_names"] for index in indexes)
 
     def test_algorithm_cache_round_trip(self, database: Database) -> None:
         """`algorithm_cache` is empty by default and stored as a dict."""

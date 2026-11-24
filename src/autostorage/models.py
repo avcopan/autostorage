@@ -23,6 +23,7 @@ from sqlmodel import (
     Relationship,
     Session,
     SQLModel,
+    Text,
     UniqueConstraint,
     col,
     select,
@@ -88,6 +89,11 @@ def geometry_hash(geo: Geometry) -> str:
     digest = hashlib.sha256(header.encode())
     digest.update(coords.tobytes())
     return digest.hexdigest()
+
+
+def identity_value_hash(value: str) -> str:
+    """SHA-256 hex digest of an identity value, which `IdentityRow`s are unique by."""
+    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def stage_hash(
@@ -943,7 +949,9 @@ class IdentityRow(SQLModel, table=True):
         algorithm: Method used to generate the identifier (e.g. ``rdkit inchi``, ``rdkit
             smiles``); its ``kind`` gives the category (e.g. ``stereoisomer``,
             ``formula``).
-        value: The resulting identifier string.
+        value: The resulting identifier string (unindexed text).
+        value_hash: `identity_value_hash` of `value`, set on flush. Unique with
+            `algorithm_name`; look identities up by it, not by `value`.
         algorithm_cache: Algorithm-specific data for this identity, stored as
             zlib-compressed JSON. Reserved: nothing writes it yet.
         stationary_links: Link rows to the stationary points sharing this identity.
@@ -951,12 +959,13 @@ class IdentityRow(SQLModel, table=True):
 
     __tablename__ = "identity"
     __table_args__ = (
-        UniqueConstraint("algorithm_name", "value", name="unique_identity"),
+        UniqueConstraint("algorithm_name", "value_hash", name="unique_identity"),
     )
 
     id: uuid.UUID | None = Field(default_factory=uuid.uuid4, primary_key=True)
     algorithm_name: str | None = _fk_field("identity_algorithm.name")
-    value: str
+    value: str = Field(sa_type=Text)
+    value_hash: str | None = Field(default=None, nullable=False)
     algorithm_cache: dict[str, Any] | None = Field(
         default=None, sa_column=_compressed_json_dict_column()
     )

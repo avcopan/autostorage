@@ -16,6 +16,7 @@ The user guide is in `user_guide/`, and `.claude/skills/` comes from the copier 
 
 `events.py` binds SQLAlchemy ORM event listeners to `AutostorageSession`, the session type that `Database.session()` returns:
 - `GeometryRow.hash` is set to `geometry_hash()` (SHA-256 of symbols, coordinates, charge, spin) on insert and update; its unique index rejects storing an equal geometry twice with an `IntegrityError`.
+- `IdentityRow.value_hash` is set to `identity_value_hash()` (SHA-256 of `value`) on insert and update. Identities are unique by `(algorithm_name, value_hash)`, and `value` is unindexed text (canonical graphs are long), so look identities up by the hash.
 - Opening a `Database` seeds `IdentityAlgorithmRow`, `ModelHashAlgorithmRow` and `PropertyKindRow` from their in-memory registries.
 - Before a flush, property values are shape-checked and cast to their kind's dtype, and a stationary point marked valid must have a Hessian.
 - A non-pseudo stationary point's `is_validated` is set on flush to whether every Hessian of its geometry has `order` negative eigenvalues (`autogeom.stationary_point_order`). A mismatch resets it with a `StationaryOrderWarning`. It is rechecked when the point or a Hessian of its geometry is added, changed, or deleted.
