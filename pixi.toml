@@ -8,9 +8,10 @@ requires-pixi = ">=0.82"
 autostorage = { path = "." }
 # Toggle with `pixi run local start|stop` (see scripts/local.sh)
 # autogeom = { path = "../autogeom" }  # local:true
-# protomol with `canonical_direction` (pm P58): the unmerged `canonical-direction`
-# worktree. Repin to protomol's `low-t-rules` once it is merged, then to the release.
-protomol = { path = "../../pm/protomol.canonical-direction" }
+# protomol with `low_t` (pm P57) and `canonical_direction` (pm P58): the local
+# `incite-run` worktree (low-t-rules + canonical-direction). Swap to the channel
+# package (`protomol>=0.0.3` in pyproject.toml) after protomol 0.0.3 is released.
+protomol = { path = "../../pm/protomol.incite-run" }
 
 [package]
 name = "autostorage"

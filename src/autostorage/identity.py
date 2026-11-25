@@ -8,6 +8,7 @@ import autogeom
 import protomol
 from autogeom import Geometry
 from protomol import AnyGraph
+from protomol._geometry import _with_parities_from_geometry
 
 from .types import IdentityKind
 
@@ -23,6 +24,7 @@ __all__ = [
     "rdkit_inchi_conn",
     "rdkit_smiles",
     "smg_conn",
+    "smg_low_t",
 ]
 
 SADDLE_ORDERS = frozenset(range(1, 10))
@@ -378,4 +380,44 @@ stereo-free, and `IdentityKind.graph_preference` ranks `isomer` above `graph`, s
 would displace the stereo-aware graph (`smg_low_t@1` for a minimum, the interim
 `protomol_graph@0` for a TS) as the one a point reads and passes to its `uses_graph`
 algorithms. A reaction graph is put in its canonical direction first.
+"""
+
+
+def smg_low_t_identity_fn(
+    geo: Geometry,
+    gra: AnyGraph | None = None,
+    other_geos: OtherGeometries = None,  # noqa: ARG001
+) -> IdentityResult:
+    """The canonical graph under the low-T scheme, with the atom map to the geometry.
+
+    The graph's sites are reassigned by `protomol.low_t` (pm P54, P57): a site the
+    graph has keeps its parity, and a site the scheme adds gets its parity from the
+    geometry (pm P53), or stays undetermined where the coordinates don't decide it.
+
+    Raises:
+        ValueError: If no graph is given, or it is a reaction graph.
+    """
+    if gra is None:
+        msg = "smg_low_t@1 needs a graph."
+        raise ValueError(msg)
+    if not isinstance(gra, protomol.MolGraph | protomol.StereoMolGraph):
+        msg = "smg_low_t@1 takes a species graph, not a reaction graph."
+        raise ValueError(msg)  # noqa: TRY004  (an IdentityGenerationWarning)
+    return _graph_result(_with_parities_from_geometry(protomol.low_t(gra), geo))
+
+
+smg_low_t = IdentityAlgorithmRegistry.register(
+    name="smg_low_t@1",
+    kind=IdentityKind.LOW_T_STEREOISOMER,
+    identity_fn=smg_low_t_identity_fn,
+    orders={0},
+    stores_graph=True,
+)
+"""Canonical graph under the low-T scheme (kind: low_t_stereoisomer; minima only;
+stores the graph).
+
+The stored graph of a minimum, and the one its `uses_graph` algorithms are passed
+on regeneration (`IdentityKind.graph_preference` ranks `low_t_stereoisomer` first).
+Unlike `rdkit_inchi`, it tells apart configurations that only interconvert at high
+temperature, such as the two invertomers of an amine N.
 """

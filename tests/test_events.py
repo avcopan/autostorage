@@ -57,9 +57,9 @@ NDIM_2 = 2
 NDIM_3 = 3
 NON_GRAPH_IDENTITY_COUNT = 4
 """The built-in identities of a minimum that don't use its graph."""
-KIND_GRAPH_EXCLUDED_COUNT = NON_GRAPH_IDENTITY_COUNT + 1
-"""The built-in identities of a minimum (`smg_conn@1` included, the interim
-`protomol_graph@0` is for saddle points only)."""
+KIND_GRAPH_EXCLUDED_COUNT = NON_GRAPH_IDENTITY_COUNT + 2
+"""The built-in identities of a minimum (`smg_conn@1` and `smg_low_t@1` included, the
+interim `protomol_graph@0` is for saddle points only)."""
 EXPECTED_IDENTITY_COUNT = KIND_GRAPH_EXCLUDED_COUNT
 NATOMS_THREE = 3
 NATOMS_TWO = 2
@@ -1811,7 +1811,8 @@ class TestOrderRestrictedIdentities:
     ) -> None:
         """Changing `order` adds or removes the order-restricted identities.
 
-        The graph identity stays: the graph is kept on an order change.
+        The graph is kept on an order change: the minimum's stored graph
+        (`smg_low_t@1`) is passed to the saddle-point graph identities.
         """
         with database.session() as session:
             stp = StationaryPointRow(
@@ -1824,7 +1825,7 @@ class TestOrderRestrictedIdentities:
             stp.order = 1
             session.commit()
             names = {i.algorithm.name for i in _identities(stp)}
-            assert names == {"hill_formula"}
+            assert names == {"hill_formula", "smg_conn@1", "protomol_graph@0"}
 
             stp.order = 0
             session.commit()
@@ -1890,10 +1891,10 @@ def _atom_count_graph_identity_fn(
 def graph_database(
     db_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[Database]:
-    """A database with two graph algorithms for minima, besides `protomol_graph@0`.
+    """A database with two graph algorithms for minima, besides the built-ins.
 
-    `min_graph@0` stands in for the stored graph of a minimum (`smg_low_t@1`, to come);
-    `protomol_graph@0` is for saddle points only.
+    `min_graph@0` stores the graph as given (`protomol_graph@0`'s function, for minima),
+    next to the built-in `smg_low_t@1`; `protomol_graph@0` is for saddle points only.
     """
     monkeypatch.setattr(
         IdentityAlgorithmRegistry,
@@ -2113,10 +2114,31 @@ class TestGraphIdentities:
             expected = protomol.canonical_json(protomol.without_stereo(gra))
             assert _identity_for_algorithm(stp, "smg_conn@1").value == expected
             assert _link_for_algorithm(stp, "smg_conn@1").atom_map is not None
-            assert set(stp.stored_graphs()) == {"min_graph@0"}
+            assert set(stp.stored_graphs()) == {"smg_low_t@1", "min_graph@0"}
             assert "protomol_graph@0" not in {
                 i.algorithm.name for i in _identities(stp)
             }
+
+    def test_smg_low_t_on_perceived_minimum(
+        self,
+        database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """A perceived minimum gets `smg_low_t@1`, its preferred stored graph."""
+        gra = protomol.from_smiles("C[N@](CC)[C@H](C)O")
+        geo = protomol.embed(gra)
+        with database.session() as session:
+            stp = StationaryPointRow(
+                geometry=GeometryRow(**geo.model_dump()), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+
+            expected = protomol.canonical_json(protomol.from_geometry(geo))
+            assert _identity_for_algorithm(stp, "smg_low_t@1").value == expected
+            assert list(stp.stored_graphs()) == ["smg_low_t@1"]
+            assert stp.graph == protomol.from_geometry(geo)
+            assert stp.graph == gra
 
     def test_perception_failure_warns(
         self,
@@ -2187,10 +2209,13 @@ class TestGraphIdentities:
             )
             session.add(stp)
             session.commit()
-            assert list(stp.stored_graphs()) == ["z_bondless@1", "a_graph@0"]
-            assert stp.graph == protomol.StereoMolGraph(
-                symbols=["O", "H", "H"], bonds=[]
-            )
+            # smg_low_t@1 (low_t_stereoisomer) ranks first, then the ladder, then graph
+            assert list(stp.stored_graphs()) == [
+                "smg_low_t@1",
+                "z_bondless@1",
+                "a_graph@0",
+            ]
+            assert stp.graph == protomol.from_geometry(stp.geometry)
 
     def test_graph_survives_new_session(
         self,
@@ -2216,7 +2241,7 @@ class TestGraphIdentities:
             assert stp is not None
             assert stp.pending_graph is None
             assert stp.graph == gra
-            assert set(stp.stored_graphs()) == {"min_graph@0"}
+            assert set(stp.stored_graphs()) == {"smg_low_t@1", "min_graph@0"}
 
     def test_no_stores_graph_link(
         self,

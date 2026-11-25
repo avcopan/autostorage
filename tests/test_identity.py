@@ -22,6 +22,7 @@ from autostorage.identity import (
     rdkit_inchi_conn,
     rdkit_smiles,
     smg_conn,
+    smg_low_t,
 )
 
 
@@ -379,6 +380,79 @@ class TestBuiltinIdentityFunctions:
         """Without a graph, `smg_conn@1` raises a ValueError."""
         with pytest.raises(ValueError, match="needs a graph"):
             smg_conn.identity_fn(water)
+
+    def test_smg_low_t_properties(self) -> None:
+        """`smg_low_t@1` is a low-T stereoisomer, for minima, and stores the graph."""
+        assert smg_low_t.name == "smg_low_t@1"
+        assert smg_low_t.kind is IdentityKind.LOW_T_STEREOISOMER
+        assert smg_low_t.orders == {0}
+        assert smg_low_t.uses_graph
+        assert smg_low_t.stores_graph
+
+    def test_smg_low_t_amine_invertomers(self) -> None:
+        """The two N invertomers of an amine differ, though the InChI lumps them."""
+        values, inchis = set(), set()
+        for smiles in ("C[N@](CC)[C@H](C)O", "C[N@@](CC)[C@H](C)O"):
+            gra = protomol.from_smiles(smiles)
+            geo = protomol.embed(gra)
+            result = smg_low_t.identity_fn(geo, protomol.from_geometry(geo))
+            assert isinstance(result, IdentityResult)
+            values.add(result.value)
+            inchis.add(rdkit_inchi.identity_fn(geo))
+        assert len(values) == 2
+        assert len(inchis) == 1
+
+    def test_smg_low_t_resonating_bond(self) -> None:
+        """An allyl-type radical's resonating C-C bond has a determined LS."""
+        gra = protomol.from_smiles("C[CH]/C=C/C")  # pent-3-en-2-yl
+        geo = protomol.embed(gra)
+        result = smg_low_t.identity_fn(geo, protomol.from_geometry(geo))
+        assert isinstance(result, IdentityResult)
+        canonical = protomol.from_json(result.value)
+        assert result.atom_map is not None
+        back = protomol.relabel(canonical, np.argsort(result.atom_map).tolist())  # ty: ignore[invalid-argument-type]
+        assert isinstance(back, protomol.StereoMolGraph)
+        for bond in ((1, 2), (2, 3)):  # C1-C2 is single in the SMILES
+            ls = protomol.stereo_at(back, bond)
+            assert isinstance(ls, protomol.PlanarBond)
+            assert ls.parity is not None
+
+    def test_smg_low_t_relabelled(self, cis_difluoroethene: Geometry) -> None:
+        """A relabelled geometry gives the same value, with its own atom map."""
+        perm = [3, 5, 0, 4, 1, 2]
+        geo = cis_difluoroethene
+        relabelled = _geometry(
+            [geo.symbols[i] for i in perm], [geo.coordinates[i].tolist() for i in perm]
+        )
+        a = smg_low_t.identity_fn(geo, protomol.from_geometry(geo))
+        b = smg_low_t.identity_fn(relabelled, protomol.from_geometry(relabelled))
+        assert isinstance(a, IdentityResult)
+        assert isinstance(b, IdentityResult)
+        assert a.value == b.value
+        assert a.atom_map != b.atom_map
+
+    def test_smg_low_t_plain_graph(
+        self, cis_difluoroethene: Geometry, trans_difluoroethene: Geometry
+    ) -> None:
+        """A plain graph gets its sites' parities from the geometry."""
+        values = []
+        for geo in (cis_difluoroethene, trans_difluoroethene):
+            gra = protomol.from_geometry(geo)
+            plain = smg_low_t.identity_fn(geo, protomol.without_stereo(gra))
+            perceived = smg_low_t.identity_fn(geo, gra)
+            assert isinstance(plain, IdentityResult)
+            assert isinstance(perceived, IdentityResult)
+            assert plain.value == perceived.value
+            assert plain.value == protomol.canonical_json(gra)
+            values.append(plain.value)
+        assert values[0] != values[1]  # cis and trans
+
+    def test_smg_low_t_needs_species_graph(self, water: Geometry) -> None:
+        """Without a graph, or with a reaction graph, `smg_low_t@1` raises."""
+        with pytest.raises(ValueError, match="needs a graph"):
+            smg_low_t.identity_fn(water)
+        with pytest.raises(ValueError, match="not a reaction graph"):
+            smg_low_t.identity_fn(water, protomol.examples.abstraction_ts())
 
     def test_accepts_geometry_row(self, water: Geometry) -> None:
         """Identity functions accept `GeometryRow`s, including in `other_geos`."""

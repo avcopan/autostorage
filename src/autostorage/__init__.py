@@ -21,6 +21,8 @@ from .identity import (
     rdkit_inchi,
     rdkit_inchi_conn,
     rdkit_smiles,
+    smg_conn,
+    smg_low_t,
 )
 from .model_hash import (
     ModelHashAlgorithm,
@@ -127,6 +129,8 @@ __all__ = [
     "rdkit_inchi",
     "rdkit_inchi_conn",
     "rdkit_smiles",
+    "smg_conn",
+    "smg_low_t",
     "stage_hash",
     "types",
 ]

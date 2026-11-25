@@ -20,6 +20,7 @@ autostorage registers the following algorithms itself:
 | `rdkit_smiles` | `stereoisomer` | `rdkit_inchi` | SMILES, from `autogeom.smiles` |
 | `hill_formula` | `formula` | `rdkit_inchi` | Formula in Hill order, from `autogeom.formula` |
 | `smg_conn@1` | `isomer` | | Canonical JSON of `protomol.without_stereo(gra)` (minima and first-order saddle points; a reaction graph in its canonical direction, `protomol.canonical_direction`), with the `atom_map`. It reads the graph but does not store it (see [Graphs](#graphs)) |
+| `smg_low_t@1` | `low_t_stereoisomer` | | Minima only: the canonical graph under the low-T scheme, `protomol.to_json` of `canonical_form` of `protomol.low_t(gra)`, with the `atom_map`. A site the graph has keeps its parity, and a site the scheme adds gets its parity from the geometry. It stores the graph (see [Graphs](#graphs)) |
 | `protomol_graph@0` | `graph` | | Saddle points only: the point's reaction graph (canonical direction), canonicalized: `protomol.to_json` of `canonical_form(gra)`, with the `atom_map` (see [Graphs](#graphs)). Interim, until TS sites exist |
 
 When a `StationaryPointRow` is added through a `Database.session()`, an `IdentityRow` is attached to it for every registered algorithm, and regenerated if its geometry or `order` changes.
@@ -119,7 +120,7 @@ Identities are unique by algorithm and `value_hash` (SHA-256 of the value, `iden
 
 An identity function also receives `gra`, the protomol graph of the point, index-aligned with its geometry (atom `i` of the graph is atom `i` of the geometry), or `None`.
 The graph supplies what one geometry can't, such as the breaking and forming bonds of a transition state, or the stereo elements the user chose.
-The built-in algorithms other than `smg_conn@1` and `protomol_graph@0` ignore it.
+The built-in algorithms other than `smg_conn@1`, `smg_low_t@1` and `protomol_graph@0` ignore it.
 
 An algorithm that reads the graph is registered with `uses_graph=True`:
 
@@ -163,10 +164,12 @@ Without a graph:
 - a saddle point (`order != 0`) skips the graph algorithms, since its breaking and forming bonds can't be read from one geometry.
 
 If no graph can be perceived, an `IdentityGenerationWarning` is issued and the graph algorithms are skipped.
-Since `smg_conn@1` is built in, every minimum without a graph has its graph perceived once (one Lewis-structure perception).
+Since `smg_conn@1` and `smg_low_t@1` are built in, every minimum without a graph has its graph perceived once (one Lewis-structure perception).
 
 An algorithm registered with `stores_graph=True` (which sets `uses_graph`) returns an `IdentityResult` whose value is the canonical graph (`protomol.to_json(canonical)`) and whose `atom_map` is the one from `protomol.canonical_form`.
-`protomol_graph@0` is one; `smg_conn@1` is not, since its value is stereo-free and, being of kind `isomer`, would outrank `protomol_graph@0` as the graph a point reads. The flag is mirrored into `IdentityAlgorithmRow.stores_graph`.
+`smg_low_t@1` (for a minimum) and `protomol_graph@0` (for a saddle point) are; `smg_conn@1` is not, since its value is stereo-free and, being of kind `isomer`, would outrank `protomol_graph@0` as the graph a saddle point reads. The flag is mirrored into `IdentityAlgorithmRow.stores_graph`.
+
+`smg_low_t@1` reassigns the graph's stereo sites with the low-T scheme (`protomol.low_t`, protomol P54 and P57): it keeps the sites the graph shares with the scheme, with their parities, drops the others, and reads the parity of each added site from the geometry. So a plain `MolGraph` gives the same value as the perceived graph, and the two N invertomers of an amine get different values, though `rdkit_inchi` gives them one.
 
 ### The durable graph
 
@@ -179,7 +182,7 @@ A point's graph is stored through its `stores_graph` links: `stp.graph` is
 It is computed on each read, so it can't go stale.
 If a point has several `stores_graph` links, the kind decides, following the hierarchy (`IdentityKind.graph_preference`): `low_t_stereoisomer` first, then down the ladder (`stereoisomer`, `isomer`, `formula`), then `conformer`, then the off-ladder `graph`; ties go to the first by algorithm name.
 The ladder itself is `IDENTITY_KIND_LADDER`, and `IdentityKind.rank` gives a kind's place on it.
-A minimum stored without a graph gets the perceived one, so its `stp.graph` is that.
+A minimum stored without a graph gets the perceived one, so its `stp.graph` is that: its `smg_low_t@1` graph, which ranks first.
 
 - **A new graph overwrites.** Setting `stp.graph` on a stored point marks it dirty; on flush only its `uses_graph` identities are regenerated, and its other links are kept as they are. The old `IdentityRow`s stay, as identities are never deleted.
 - **A new geometry or `order`** regenerates every identity. Each `uses_graph` algorithm gets the stored graph (a `stores_graph` algorithm its own link's, else the preferred one), read before the old links are cleared. It is kept if the new geometry has the same symbols in the same order; otherwise a minimum gets a perceived graph and a saddle point skips the graph algorithms. Changing only the `order` keeps the graph.
