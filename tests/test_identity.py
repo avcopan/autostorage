@@ -11,6 +11,7 @@ from protomol import AnyGraph
 
 from autostorage import GeometryRow
 from autostorage.identity import (
+    SADDLE_ORDERS,
     IdentityAlgorithm,
     IdentityAlgorithmRegistry,
     IdentityKind,
@@ -20,6 +21,7 @@ from autostorage.identity import (
     rdkit_inchi,
     rdkit_inchi_conn,
     rdkit_smiles,
+    smg_conn,
 )
 
 
@@ -182,7 +184,8 @@ class TestIdentityAlgorithmRegistry:
         builtins = (rdkit_inchi_conn, rdkit_inchi, rdkit_smiles, hill_formula)
         assert not any(alg.uses_graph for alg in builtins)
         assert protomol_graph.kind is IdentityKind.GRAPH
-        assert protomol_graph.orders is None
+        assert protomol_graph.orders == SADDLE_ORDERS
+        assert 0 not in SADDLE_ORDERS
         assert protomol_graph.uses_graph
         assert protomol_graph.stores_graph
 
@@ -295,6 +298,87 @@ class TestBuiltinIdentityFunctions:
         """Without a graph, `protomol_graph@0` raises a ValueError."""
         with pytest.raises(ValueError, match="needs a graph"):
             protomol_graph.identity_fn(water)
+
+    def test_smg_conn_properties(self) -> None:
+        """`smg_conn@1` is an isomer, for minima and TSs, graph-reading, non-storing."""
+        assert smg_conn.name == "smg_conn@1"
+        assert smg_conn.kind is IdentityKind.ISOMER
+        assert smg_conn.orders == {0, 1}
+        assert smg_conn.uses_graph
+        assert not smg_conn.stores_graph
+
+    def test_smg_conn_ignores_stereo(
+        self, cis_difluoroethene: Geometry, trans_difluoroethene: Geometry
+    ) -> None:
+        """Stereoisomers share `smg_conn@1` but not the InChI."""
+        cis_gra = protomol.from_geometry(cis_difluoroethene)
+        trans_gra = protomol.from_geometry(trans_difluoroethene)
+        assert cis_gra != trans_gra
+        cis = smg_conn.identity_fn(cis_difluoroethene, cis_gra)
+        trans = smg_conn.identity_fn(trans_difluoroethene, trans_gra)
+        assert isinstance(cis, IdentityResult)
+        assert isinstance(trans, IdentityResult)
+        assert cis.value == trans.value
+        assert cis.value == protomol.canonical_json(protomol.without_stereo(cis_gra))
+        assert rdkit_inchi.identity_fn(cis_difluoroethene) != rdkit_inchi.identity_fn(
+            trans_difluoroethene
+        )
+
+    def test_smg_conn_relabelled(self, cis_difluoroethene: Geometry) -> None:
+        """A relabelled geometry gives the same value, with its own atom map."""
+        perm = [3, 5, 0, 4, 1, 2]
+        geo = cis_difluoroethene
+        relabelled = _geometry(
+            [geo.symbols[i] for i in perm], [geo.coordinates[i].tolist() for i in perm]
+        )
+        a = smg_conn.identity_fn(geo, protomol.from_geometry(geo))
+        b = smg_conn.identity_fn(relabelled, protomol.from_geometry(relabelled))
+        assert isinstance(a, IdentityResult)
+        assert isinstance(b, IdentityResult)
+        assert a.value == b.value
+        assert a.atom_map != b.atom_map
+
+    def test_smg_conn_plain_graph(self, water: Geometry) -> None:
+        """A graph without stereo fields is used as it is."""
+        gra = protomol.without_stereo(protomol.from_geometry(water))
+        result = smg_conn.identity_fn(water, gra)
+        assert isinstance(result, IdentityResult)
+        assert result.value == protomol.canonical_json(gra)
+
+    def test_ts_graph_and_reverse_share_value(self, water: Geometry) -> None:
+        """A TS graph and its reverse give one value, for both TS-capable algorithms."""
+        ts_gra = protomol.examples.abstraction_ts()
+        rev = protomol.reverse(ts_gra)
+        assert rev != ts_gra
+        for alg in (smg_conn, protomol_graph):
+            a = alg.identity_fn(water, ts_gra)
+            b = alg.identity_fn(water, rev)
+            assert isinstance(a, IdentityResult)
+            assert isinstance(b, IdentityResult)
+            assert a.value == b.value
+            assert a.cache is not None
+            assert b.cache is not None
+            assert a.cache["reversed"] != b.cache["reversed"]
+            # The atom map takes the canonical graph to the (maybe reversed) graph
+            canonical = protomol.from_json(a.value)
+            assert a.atom_map is not None
+            back = protomol.relabel(canonical, np.argsort(a.atom_map).tolist())  # ty: ignore[invalid-argument-type]
+            expected = protomol.reverse(ts_gra) if a.cache["reversed"] else ts_gra
+            if alg is protomol_graph:
+                assert back == expected
+            else:
+                assert back == protomol.without_stereo(expected)
+
+    def test_minimum_graph_has_no_reversal_cache(self, water: Geometry) -> None:
+        """A minimum's graph has no direction, so no `reversed` entry."""
+        result = smg_conn.identity_fn(water, protomol.from_geometry(water))
+        assert isinstance(result, IdentityResult)
+        assert result.cache is None
+
+    def test_smg_conn_needs_graph(self, water: Geometry) -> None:
+        """Without a graph, `smg_conn@1` raises a ValueError."""
+        with pytest.raises(ValueError, match="needs a graph"):
+            smg_conn.identity_fn(water)
 
     def test_accepts_geometry_row(self, water: Geometry) -> None:
         """Identity functions accept `GeometryRow`s, including in `other_geos`."""

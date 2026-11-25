@@ -22,7 +22,11 @@ __all__ = [
     "rdkit_inchi",
     "rdkit_inchi_conn",
     "rdkit_smiles",
+    "smg_conn",
 ]
+
+SADDLE_ORDERS = frozenset(range(1, 10))
+"""The orders of saddle points (`order >= 1`), for algorithms that apply to them."""
 
 # `Mapping` is covariant in its values, so `dict[str, GeometryRow]` is accepted
 type OtherGeometries = Mapping[str, Geometry] | None
@@ -287,6 +291,21 @@ hill_formula = IdentityAlgorithmRegistry.register(
 """Molecular formula in Hill order (kind: formula)."""
 
 
+def _is_reaction(gra: AnyGraph) -> bool:
+    """Whether `gra` is a reaction graph (a TS graph)."""
+    return isinstance(gra, protomol.ReactionGraph | protomol.StereoReactionGraph)
+
+
+def _graph_result(gra: AnyGraph) -> IdentityResult:
+    """The canonical JSON of `gra` in its canonical direction, with its atom map."""
+    reverse = False
+    if _is_reaction(gra):
+        gra, reverse = protomol.canonical_direction(gra)  # ty: ignore[invalid-argument-type]
+    canonical, atom_map = protomol.canonical_form(gra)  # ty: ignore[invalid-argument-type]
+    cache = {"reversed": reverse} if _is_reaction(gra) else None
+    return IdentityResult(protomol.to_json(canonical), atom_map=atom_map, cache=cache)
+
+
 def protomol_graph_identity_fn(
     geo: Geometry,  # noqa: ARG001
     gra: AnyGraph | None = None,
@@ -294,25 +313,69 @@ def protomol_graph_identity_fn(
 ) -> IdentityResult:
     """The canonical graph's JSON, with the atom map from it to the geometry.
 
+    A reaction graph is put in its canonical direction first (see
+    `protomol.canonical_direction`), and `algorithm_cache["reversed"]` says whether
+    it was reversed.
+
     Raises:
         ValueError: If no graph is given.
     """
     if gra is None:
         msg = "protomol_graph@0 needs a graph."
         raise ValueError(msg)
-    canonical, atom_map = protomol.canonical_form(gra)  # ty: ignore[invalid-argument-type]
-    return IdentityResult(protomol.to_json(canonical), atom_map=atom_map)
+    return _graph_result(gra)
 
 
 protomol_graph = IdentityAlgorithmRegistry.register(
     name="protomol_graph@0",
     kind=IdentityKind.GRAPH,
     identity_fn=protomol_graph_identity_fn,
+    orders=SADDLE_ORDERS,
     stores_graph=True,
 )
-"""The protomol graph as given, canonicalized (kind: graph; stores the graph).
+"""The protomol graph as given, canonicalized (kind: graph; saddle points only;
+stores the graph).
 
-Interim: it stands in for the SMG schemes and is dropped once `smg_low_t@1` exists.
-An order-0 point without a graph gets one perceived from its geometry (one Lewis
-structure perception per point); a saddle point needs its reaction graph.
+Interim durable graph of a transition state, until TS sites exist (pm P57); a
+minimum gets its stored graph from `smg_low_t@1`. A reaction graph is put in its
+canonical direction, so a TS and its reverse share one value; a saddle point needs
+its reaction graph.
+"""
+
+
+def smg_conn_identity_fn(
+    geo: Geometry,  # noqa: ARG001
+    gra: AnyGraph | None = None,
+    other_geos: OtherGeometries = None,  # noqa: ARG001
+) -> IdentityResult:
+    """The canonical JSON of the stereo-free graph, with the atom map to the geometry.
+
+    A reaction graph is put in its canonical direction (of the stereo-free graph),
+    and `algorithm_cache["reversed"]` says whether it was reversed.
+
+    Raises:
+        ValueError: If no graph is given.
+    """
+    if gra is None:
+        msg = "smg_conn@1 needs a graph."
+        raise ValueError(msg)
+    if isinstance(gra, protomol.StereoMolGraph | protomol.StereoReactionGraph):
+        gra = protomol.without_stereo(gra)
+    return _graph_result(gra)
+
+
+smg_conn = IdentityAlgorithmRegistry.register(
+    name="smg_conn@1",
+    kind=IdentityKind.ISOMER,
+    identity_fn=smg_conn_identity_fn,
+    orders={0, 1},
+    uses_graph=True,
+)
+"""Stereo-free canonical graph (kind: isomer; minima and first-order saddle points).
+
+It does not store the graph (`stores_graph=False`): the stored graph would be
+stereo-free, and `IdentityKind.graph_preference` ranks `isomer` above `graph`, so it
+would displace the stereo-aware graph (`smg_low_t@1` for a minimum, the interim
+`protomol_graph@0` for a TS) as the one a point reads and passes to its `uses_graph`
+algorithms. A reaction graph is put in its canonical direction first.
 """

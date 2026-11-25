@@ -31,6 +31,7 @@ from autostorage import (
 )
 from autostorage.database import Database
 from autostorage.events import MAX_MODEL_HASH_LENGTH
+from autostorage.identity import protomol_graph
 from autostorage.models import (
     CalculationRow,
     GeometryRow,
@@ -55,8 +56,11 @@ from autostorage.models import (
 NDIM_2 = 2
 NDIM_3 = 3
 NON_GRAPH_IDENTITY_COUNT = 4
-"""The built-in identities of a minimum, other than `protomol_graph@0`."""
-EXPECTED_IDENTITY_COUNT = NON_GRAPH_IDENTITY_COUNT + 1
+"""The built-in identities of a minimum that don't use its graph."""
+KIND_GRAPH_EXCLUDED_COUNT = NON_GRAPH_IDENTITY_COUNT + 1
+"""The built-in identities of a minimum (`smg_conn@1` included, the interim
+`protomol_graph@0` is for saddle points only)."""
+EXPECTED_IDENTITY_COUNT = KIND_GRAPH_EXCLUDED_COUNT
 NATOMS_THREE = 3
 NATOMS_TWO = 2
 N_BUILTIN_HASHES = 2  # minimal@1 and exact@1
@@ -1747,7 +1751,7 @@ class TestOrderRestrictedIdentities:
             stp.order = 1
             session.commit()
             names = {i.algorithm.name for i in _identities(stp)}
-            assert names == {"hill_formula", "protomol_graph@0"}
+            assert names == {"hill_formula"}
 
             stp.order = 0
             session.commit()
@@ -1813,11 +1817,22 @@ def _atom_count_graph_identity_fn(
 def graph_database(
     db_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[Database]:
-    """A database with a second graph algorithm, besides `protomol_graph@0`."""
+    """A database with two graph algorithms for minima, besides `protomol_graph@0`.
+
+    `min_graph@0` stands in for the stored graph of a minimum (`smg_low_t@1`, to come);
+    `protomol_graph@0` is for saddle points only.
+    """
     monkeypatch.setattr(
         IdentityAlgorithmRegistry,
         "algorithms",
         list(IdentityAlgorithmRegistry.algorithms),
+    )
+    IdentityAlgorithmRegistry.register(
+        name="min_graph@0",
+        kind=IdentityKind.GRAPH,
+        identity_fn=protomol_graph.identity_fn,
+        orders={0},
+        stores_graph=True,
     )
     IdentityAlgorithmRegistry.register(
         name="atom_count_graph",
@@ -1876,7 +1891,7 @@ class TestGraphIdentities:
             session.add(stp)
             session.commit()
 
-            link = _link_for_algorithm(stp, "protomol_graph@0")
+            link = _link_for_algorithm(stp, "min_graph@0")
             assert link.identity.value == protomol.canonical_json(gra)
             assert link.atom_map is not None
             canonical = protomol.from_json(link.identity.value)
@@ -1900,7 +1915,7 @@ class TestGraphIdentities:
             session.add(stp)
             session.commit()
 
-            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+            value = _identity_for_algorithm(stp, "min_graph@0").value
             assert value == protomol.canonical_json(protomol.from_geometry(geo))
             assert _identity_for_algorithm(stp, "atom_count_graph").value == "3"
             assert len(count_perceptions) == 1
@@ -1943,6 +1958,44 @@ class TestGraphIdentities:
             value = _identity_for_algorithm(stp, "protomol_graph@0").value
             assert value == protomol.canonical_json(ts_gra)
 
+    def test_ts_and_reverse_share_identities_and_graph(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+    ) -> None:
+        """A TS and its reverse get one `smg_conn@1` and one `protomol_graph@0`."""
+        ts_gra = protomol.examples.abstraction_ts()
+        rev = protomol.reverse(ts_gra)
+        geo = protomol.embed(protomol.reactants(ts_gra))
+        with graph_database.session() as session:
+            fwd = StationaryPointRow(
+                geometry=GeometryRow(**geo.model_dump()),
+                calculation=make_calculation(),
+                order=1,
+                graph=ts_gra,
+            )
+            bwd = StationaryPointRow(
+                geometry=GeometryRow(**autogeom.translate(geo, [1, 0, 0]).model_dump()),
+                calculation=make_calculation(),
+                order=1,
+                graph=rev,
+            )
+            session.add_all([fwd, bwd])
+            session.commit()
+
+            for name in ("smg_conn@1", "protomol_graph@0"):
+                assert (
+                    _identity_for_algorithm(fwd, name).id
+                    == _identity_for_algorithm(bwd, name).id
+                )
+            # The stored graph is the stereo-aware one, in each point's own direction
+            assert set(fwd.stored_graphs()) == {"protomol_graph@0"}
+            assert fwd.graph == ts_gra
+            assert bwd.graph == rev
+            cache = _link_for_algorithm(fwd, "protomol_graph@0").algorithm_cache
+            assert cache is not None
+            assert "reversed" in cache
+
     def test_builtins_unchanged(
         self,
         graph_database: Database,
@@ -1966,8 +2019,31 @@ class TestGraphIdentities:
             session.add(without)
             session.commit()
 
-            assert len(_builtin_values(with_graph)) == NON_GRAPH_IDENTITY_COUNT
+            assert len(_builtin_values(with_graph)) == KIND_GRAPH_EXCLUDED_COUNT
             assert _builtin_values(with_graph) == _builtin_values(without)
+
+    def test_smg_conn_on_perceived_minimum(
+        self,
+        graph_database: Database,
+        make_calculation: Callable[[], CalculationRow],
+        make_geometry_water: Callable[[], GeometryRow],
+    ) -> None:
+        """A perceived minimum gets `smg_conn@1`, which stores no graph."""
+        with graph_database.session() as session:
+            stp = StationaryPointRow(
+                geometry=make_geometry_water(), calculation=make_calculation()
+            )
+            session.add(stp)
+            session.commit()
+
+            gra = protomol.from_geometry(stp.geometry)
+            expected = protomol.canonical_json(protomol.without_stereo(gra))
+            assert _identity_for_algorithm(stp, "smg_conn@1").value == expected
+            assert _link_for_algorithm(stp, "smg_conn@1").atom_map is not None
+            assert set(stp.stored_graphs()) == {"min_graph@0"}
+            assert "protomol_graph@0" not in {
+                i.algorithm.name for i in _identities(stp)
+            }
 
     def test_perception_failure_warns(
         self,
@@ -2018,7 +2094,14 @@ class TestGraphIdentities:
             canonical, atom_map = protomol.canonical_form(bare)
             return IdentityResult(protomol.to_json(canonical), atom_map=atom_map)
 
-        # Sorts after `protomol_graph@0` by name, but its kind is preferred
+        # A graph-kind algorithm that sorts first by name, but ranks after the kind
+        IdentityAlgorithmRegistry.register(
+            name="a_graph@0",
+            kind=IdentityKind.GRAPH,
+            identity_fn=protomol_graph.identity_fn,
+            orders={0},
+            stores_graph=True,
+        )
         IdentityAlgorithmRegistry.register(
             name="z_bondless@1",
             kind=IdentityKind.STEREOISOMER,
@@ -2031,7 +2114,7 @@ class TestGraphIdentities:
             )
             session.add(stp)
             session.commit()
-            assert list(stp.stored_graphs()) == ["z_bondless@1", "protomol_graph@0"]
+            assert list(stp.stored_graphs()) == ["z_bondless@1", "a_graph@0"]
             assert stp.graph == protomol.StereoMolGraph(
                 symbols=["O", "H", "H"], bonds=[]
             )
@@ -2060,7 +2143,7 @@ class TestGraphIdentities:
             assert stp is not None
             assert stp.pending_graph is None
             assert stp.graph == gra
-            assert set(stp.stored_graphs()) == {"protomol_graph@0"}
+            assert set(stp.stored_graphs()) == {"min_graph@0"}
 
     def test_no_stores_graph_link(
         self,
@@ -2131,10 +2214,11 @@ class TestGraphIdentities:
             )
             session.add(stp)
             session.commit()
-            value = _identity_for_algorithm(stp, "protomol_graph@0").value
+            value = _identity_for_algorithm(stp, "min_graph@0").value
 
             stp.order = 1
             session.commit()
+            # The saddle-point algorithm gets the kept graph
             assert _identity_for_algorithm(stp, "protomol_graph@0").value == value
             assert stp.graph == gra
             assert count_perceptions == []
@@ -2153,7 +2237,7 @@ class TestGraphIdentities:
             session.add(stp)
             session.commit()
             before = {link.identity.algorithm_name: link for link in stp.identity_links}
-            old_graph_id = before["protomol_graph@0"].identity_id
+            old_graph_id = before["min_graph@0"].identity_id
 
             # Water given as two fragments: O-H and H
             new_gra = protomol.StereoMolGraph(symbols=["O", "H", "H"], bonds=[(0, 1)])
@@ -2169,9 +2253,9 @@ class TestGraphIdentities:
             assert (
                 after["hill_formula"].identity_id == before["hill_formula"].identity_id
             )
-            new_value = after["protomol_graph@0"].identity.value
+            new_value = after["min_graph@0"].identity.value
             assert new_value == protomol.canonical_json(new_gra)
-            assert after["protomol_graph@0"].identity_id != old_graph_id
+            assert after["min_graph@0"].identity_id != old_graph_id
             # The old identity is kept, as identities are never deleted
             assert session.get(IdentityRow, old_graph_id) is not None
             assert stp.pending_graph is None
