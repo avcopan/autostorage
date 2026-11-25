@@ -200,6 +200,26 @@ def verify_step_barrierless_consistency(
         raise ValueError(msg)
 
 
+@event.listens_for(StepRow, "before_insert")
+@event.listens_for(StepRow, "before_update")
+def verify_step_no_barrierless_self_reaction(
+    mapper: Mapper[StepRow],  # noqa: ARG001
+    connection: Connection,  # noqa: ARG001
+    target: StepRow,
+) -> None:
+    """Verify that a step from a stage to itself has a transition state.
+
+    A conformational TS between copies of one point is a self-reaction, but A -> A
+    with no barrier is no step.
+    """
+    if target.stage_id1 == target.stage_id2 and target.stage_id_ts is None:
+        msg = (
+            f"Self-reaction step (stage_id1 == stage_id2 == {target.stage_id1}) "
+            "must have a transition state (stage_id_ts!=None)"
+        )
+        raise ValueError(msg)
+
+
 def _pending[T](session: Session, cls: type[T]) -> list[T]:
     """Return new and modified objects of type `cls` in `session`.
 
