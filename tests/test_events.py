@@ -418,11 +418,15 @@ class TestSortStepStageIds:
             session.add(stage)
             session.flush()
 
-            # Equal IDs are allowed: a self-reaction
+            # Equal IDs are allowed for a self-reaction with a TS
+            stage_ts = make_stage(is_ts=True)
+            session.add(stage_ts)
+            session.flush()
             step = StepRow(
                 stage_id1=stage.id,
                 stage_id2=stage.id,
-                is_barrierless=True,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
             )
             session.add(step)
             session.commit()
@@ -455,6 +459,75 @@ class TestSortStepStageIds:
             assert step.stage_id1 < step.stage_id2
             assert step.stage_id1 == stage_x.id
             assert step.stage_id2 == stage_z.id
+
+
+class TestVerifyStepNoBarrierlessSelfReaction:
+    """Tests for verify_step_no_barrierless_self_reaction event listener."""
+
+    def test_barrierless_self_step_rejected(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """A -> A with no TS is rejected on insert."""
+        with database.session() as session:
+            stage = make_stage()
+            session.add(stage)
+            session.flush()
+
+            step = StepRow(stage_id1=stage.id, stage_id2=stage.id, is_barrierless=True)
+            session.add(step)
+            with pytest.raises(ValueError, match="Self-reaction step"):
+                session.flush()
+
+    def test_barrierless_self_step_rejected_on_update(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """Changing a step's stages to A -> A with no TS is rejected."""
+        with database.session() as session:
+            stages = [make_stage() for _ in range(2)]
+            session.add_all(stages)
+            session.flush()
+            step = StepRow(
+                stage_id1=stages[0].id, stage_id2=stages[1].id, is_barrierless=True
+            )
+            session.add(step)
+            session.flush()
+
+            step.stage_id2 = step.stage_id1
+            with pytest.raises(ValueError, match="Self-reaction step"):
+                session.flush()
+
+    def test_self_step_with_ts_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """A -> A with a TS stage is a valid conformational step."""
+        with database.session() as session:
+            stage = make_stage()
+            stage_ts = make_stage(is_ts=True)
+            session.add_all([stage, stage_ts])
+            session.flush()
+            step = StepRow(
+                stage_id1=stage.id,
+                stage_id2=stage.id,
+                stage_id_ts=stage_ts.id,
+                is_barrierless=False,
+            )
+            session.add(step)
+            session.commit()
+            assert step.stage_id1 == step.stage_id2
+
+    def test_barrierless_step_between_different_stages_valid(
+        self, make_stage: Callable[..., StageRow], database: Database
+    ) -> None:
+        """A barrierless step between different stages is unaffected."""
+        with database.session() as session:
+            stage1 = make_stage()
+            stage2 = make_stage()
+            session.add_all([stage1, stage2])
+            session.flush()
+            session.add(
+                StepRow(stage_id1=stage1.id, stage_id2=stage2.id, is_barrierless=True)
+            )
+            session.commit()
 
 
 class TestVerifyStepBarrierlessConsistency:
