@@ -12,7 +12,7 @@ import pint
 import py3Dmol
 from autogeom import Geometry, angle, dihedral, distance, ureg
 from autogeom.types import CoordinatesField
-from protomol import AnyGraph, from_json, relabel
+from protomol import AnyGraph, from_json, relabel, reverse
 from sqlalchemy import inspect
 from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.orm.attributes import flag_dirty
@@ -809,24 +809,27 @@ class StationaryPointRow(SQLModel, table=True):
         """The graphs rebuilt from this point's `stores_graph` links, by algorithm.
 
         Each is the stored canonical graph relabelled by the inverse of the link's
-        `atom_map`, so it is index-aligned with the geometry. Ordered by preference:
-        by kind (`IdentityKind.graph_preference`: `low_t_stereoisomer`, then down
-        the ladder), then by algorithm name.
+        `atom_map`, so it is index-aligned with the geometry, and reversed again if
+        the link's `algorithm_cache` says the reaction graph was stored reversed.
+        Ordered by preference: by kind (`IdentityKind.graph_preference`:
+        `low_t_stereoisomer`, then down the ladder), then by algorithm name.
         """
-        found: list[tuple[int, str, str, list[int]]] = []
+        found: list[tuple[int, str, str, list[int], bool]] = []
         for link in self.identity_links:
             ident = link.identity
             alg = None if ident is None else ident.algorithm
             if alg is None or not alg.stores_graph or link.atom_map is None:
                 continue
             preference = IdentityKind(alg.kind).graph_preference
-            found.append((preference, alg.name, ident.value, link.atom_map))
+            reversed_ = bool((link.algorithm_cache or {}).get("reversed", False))
+            found.append((preference, alg.name, ident.value, link.atom_map, reversed_))
         graphs: dict[str, AnyGraph] = {}
-        for _, name, value, atom_map in sorted(found, key=lambda t: t[:2]):
+        for _, name, value, atom_map, reversed_ in sorted(found, key=lambda t: t[:2]):
             inverse = [0] * len(atom_map)  # inverse[geometry index] = canonical index
             for k, i in enumerate(atom_map):
                 inverse[i] = k
-            graphs[name] = relabel(from_json(value), inverse)  # ty: ignore[invalid-argument-type]
+            gra = relabel(from_json(value), inverse)  # ty: ignore[invalid-argument-type]
+            graphs[name] = reverse(gra) if reversed_ else gra
         return graphs
 
 
